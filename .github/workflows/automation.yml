@@ -21,6 +21,14 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
 
+      # ★ 追加：起動直後のランダム遅延（1〜5分）
+      - name: Initial Random Delay
+        run: |
+          DELAY=$((RANDOM % 241 + 60))  # 60〜300秒
+          echo "初期待機: ${DELAY}秒"
+          sleep $DELAY
+          echo "待機完了、処理を開始します"
+
       - name: Execute Task Alpha
         env:
           SCRIPT_BASE64: ${{ secrets.SCRIPT_A_BASE64 }}
