@@ -1,9 +1,6 @@
 name: Scheduled Task Runner
 on:
-  # cron式は削除（必要に応じてバックアップとして残す）
-  # schedule:
-  #   - cron: '20,50 * * * *'
-  workflow_dispatch:  # n8nなど外部からのトリガー専用
+  workflow_dispatch:  # API/n8nからのトリガー専用
 
 jobs:
   run-scheduled-tasks:
@@ -19,8 +16,6 @@ jobs:
         run: |
           npm install playwright
           npx playwright install chromium --with-deps
-      
-      # ランダム遅延は削除済み
       
       - name: Execute Task Alpha
         env:
