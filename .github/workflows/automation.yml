@@ -1,7 +1,6 @@
 name: Scheduled Task Runner
 on:
   workflow_dispatch:  # API/n8nからのトリガー専用
-
 jobs:
   run-scheduled-tasks:
     runs-on: ubuntu-latest
@@ -30,8 +29,9 @@ jobs:
       
       - name: Pause Interval (1)
         run: |
-          echo "待機中..."
-          sleep 300
+          WAIT_TIME=$((300 + RANDOM % 61))
+          echo "待機中... (${WAIT_TIME}秒)"
+          sleep $WAIT_TIME
           echo "再開"
       
       - name: Execute Task Beta - Phase 1
@@ -47,8 +47,9 @@ jobs:
       
       - name: Pause Interval (2)
         run: |
-          echo "待機中..."
-          sleep 300
+          WAIT_TIME=$((300 + RANDOM % 61))
+          echo "待機中... (${WAIT_TIME}秒)"
+          sleep $WAIT_TIME
           echo "再開"
       
       - name: Execute Task Beta - Phase 2
@@ -64,8 +65,9 @@ jobs:
       
       - name: Pause Interval (3)
         run: |
-          echo "待機中..."
-          sleep 300
+          WAIT_TIME=$((300 + RANDOM % 61))
+          echo "待機中... (${WAIT_TIME}秒)"
+          sleep $WAIT_TIME
           echo "再開"
       
       - name: Execute Task Beta - Phase 3
@@ -78,6 +80,13 @@ jobs:
           node task-beta.js
           rm task-beta.js
           echo "[Task Beta - Phase 3] 完了"
+      
+      - name: Pause Interval (4)
+        run: |
+          WAIT_TIME=$((300 + RANDOM % 61))
+          echo "待機中... (${WAIT_TIME}秒)"
+          sleep $WAIT_TIME
+          echo "再開"
       
       - name: Execute Task Beta - Phase 4
         env:
