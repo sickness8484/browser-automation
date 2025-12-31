@@ -1,0 +1,106 @@
+name: Scheduled Task Runner
+on:
+  workflow_dispatch:  # API/n8nからのトリガー専用
+jobs:
+  run-scheduled-tasks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Setup Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Dependencies
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
+      
+      - name: Execute Task Alpha
+        env:
+          SCRIPT_BASE64: ${{ secrets.SCRIPT_P_BASE64 }}
+        run: |
+          echo "[Task Alpha] 開始"
+          echo "$SCRIPT_BASE64" | base64 -d > task-alpha.js
+          node task-alpha.js
+          rm task-alpha.js
+          echo "[Task Alpha] 完了"
+      
+      - name: Pause Interval (1)
+        run: |
+          WAIT_TIME=$((300 + RANDOM % 61))
+          echo "待機中... (${WAIT_TIME}秒)"
+          sleep $WAIT_TIME
+          echo "再開"
+      
+      - name: Execute Task Beta - Phase 1
+        env:
+          SCRIPT_BASE64: ${{ secrets.SCRIPT_Q_BASE64 }}
+        run: |
+          echo "[Task Beta - Phase 1] 開始"
+          echo "$SCRIPT_BASE64" | base64 -d > task-beta.js
+          node task-beta.js
+          rm task-beta.js
+          echo "[Task Beta - Phase 1] 完了"
+      
+      - name: Pause Interval (2)
+        run: |
+          WAIT_TIME=$((300 + RANDOM % 61))
+          echo "待機中... (${WAIT_TIME}秒)"
+          sleep $WAIT_TIME
+          echo "再開"
+      
+      - name: Execute Task Beta - Phase 2
+        env:
+          SCRIPT_BASE64: ${{ secrets.SCRIPT_Q_BASE64 }}
+        run: |
+          echo "[Task Beta - Phase 2] 開始"
+          echo "$SCRIPT_BASE64" | base64 -d > task-beta.js
+          node task-beta.js
+          rm task-beta.js
+          echo "[Task Beta - Phase 2] 完了"
+      
+      - name: Pause Interval (3)
+        run: |
+          WAIT_TIME=$((300 + RANDOM % 61))
+          echo "待機中... (${WAIT_TIME}秒)"
+          sleep $WAIT_TIME
+          echo "再開"
+      
+      - name: Execute Task Beta - Phase 3
+        env:
+          SCRIPT_BASE64: ${{ secrets.SCRIPT_Q_BASE64 }}
+        run: |
+          echo "[Task Beta - Phase 3] 開始"
+          echo "$SCRIPT_BASE64" | base64 -d > task-beta.js
+          node task-beta.js
+          rm task-beta.js
+          echo "[Task Beta - Phase 3] 完了"
+      
+      - name: Pause Interval (4)
+        run: |
+          WAIT_TIME=$((300 + RANDOM % 61))
+          echo "待機中... (${WAIT_TIME}秒)"
+          sleep $WAIT_TIME
+          echo "再開"
+      
+      - name: Execute Task Beta - Phase 4
+        env:
+          SCRIPT_BASE64: ${{ secrets.SCRIPT_Q_BASE64 }}
+        run: |
+          echo "[Task Beta - Phase 4] 開始"
+          echo "$SCRIPT_BASE64" | base64 -d > task-beta.js
+          node task-beta.js
+          rm task-beta.js
+          echo "[Task Beta - Phase 4] 完了"
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "処理が完了しました"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Task Alpha: 1回"
+          echo "Task Beta: 4回"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
