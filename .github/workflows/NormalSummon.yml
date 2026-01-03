@@ -1,0 +1,38 @@
+name: Normal Summon Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-normal-summon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Setup Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Dependencies
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
+      
+      - name: Execute Task
+        env:
+          SCRIPT_CONTENT: ${{ secrets.NORMAL_SUMMON_AUTOMATION }}
+        run: |
+          echo "[Task] Starting"
+          echo "$SCRIPT_CONTENT" > task.js
+          node task.js
+          rm task.js
+          echo "[Task] Completed"
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Task execution completed"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
