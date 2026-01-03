@@ -1,0 +1,38 @@
+name: War Task Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-war-task:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Setup Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Dependencies
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
+      
+      - name: Execute Task
+        env:
+          SCRIPT_BASE64: ${{ secrets.SCRIPT_WAR_BASE64 }}
+        run: |
+          echo "[Task] Starting"
+          echo "$SCRIPT_BASE64" | base64 -d > task.js
+          node task.js
+          rm task.js
+          echo "[Task] Completed"
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Task execution completed"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
