@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-raid-scripts:
+  run-scripts:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     
