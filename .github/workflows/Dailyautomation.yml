@@ -1,38 +1,33 @@
-name: War Task Runner
+name: Run Battle Script
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 手動実行 & API実行
 
 jobs:
-  run-war-task:
+  run-script:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     
     steps:
-      - name: Setup Runtime
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
       
-      - name: Install Dependencies
+      - name: Install Playwright
         run: |
-          npm install playwright
-          npx playwright install chromium --with-deps
+          npm install -g playwright
+          npx playwright install chromium
       
-      - name: Execute Task
-        env:
-          SCRIPT_BASE64: ${{ secrets.SCRIPT_WAR_BASE64 }}
+      - name: Create script from secret
         run: |
-          echo "[Task] Starting"
-          echo "$SCRIPT_BASE64" | base64 -d > task.js
-          node task.js
-          rm task.js
-          echo "[Task] Completed"
+          echo "${{ secrets.SCRIPT_WAR }}" > go-to-battle.js
       
-      - name: Summary
+      - name: Run battle script
+        run: |
+          node go-to-battle.js
+        timeout-minutes: 30
+      
+      - name: Cleanup
         if: always()
         run: |
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "Task execution completed"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+          rm -f go-to-battle.js
