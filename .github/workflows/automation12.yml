@@ -1,0 +1,64 @@
+name: Raid Automation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-raid-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+
+      - name: Run automation scripts
+        env:
+          SCRIPT_X_BASE64: ${{ secrets.SCRIPT_X_BASE64 }}
+          SCRIPT_Y_BASE64: ${{ secrets.SCRIPT_Y_BASE64 }}
+        run: |
+          # SCRIPT_X (quest-and-raid-full.js) を実行
+          echo "Running SCRIPT_X..."
+          echo "$SCRIPT_X_BASE64" > script_x.js
+          node script_x.js
+          
+          # 5回のループ
+          for i in {1..5}; do
+            echo "=== Cycle $i/5 ==="
+            
+            # 3〜5分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 121))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # SCRIPT_Y (login-and-raid.js) を実行
+            echo "Running SCRIPT_Y (1st time in cycle $i)..."
+            echo "$SCRIPT_Y_BASE64" > script_y.js
+            node script_y.js
+            
+            # 3〜5分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 121))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # SCRIPT_Y を再度実行
+            echo "Running SCRIPT_Y (2nd time in cycle $i)..."
+            node script_y.js
+          done
+          
+          echo "All cycles completed!"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f script_x.js script_y.js
