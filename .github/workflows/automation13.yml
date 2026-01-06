@@ -1,0 +1,58 @@
+name: Automation
+on:
+  workflow_dispatch:
+jobs:
+  run-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+      - name: Run automation scripts
+        env:
+          SCRIPT_1: ${{ secrets.SCRIPT_1 }}
+          SCRIPT_2: ${{ secrets.SCRIPT_2 }}
+        run: |
+          # SCRIPT_1 (quest-and-raid-full.js) を実行
+          echo "Running SCRIPT_1..."
+          echo "$SCRIPT_1" > script_1.js
+          node script_1.js
+          
+          # 5回のループ
+          for i in {1..5}; do
+            echo "=== Cycle $i/5 ==="
+            
+            # 3〜5分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 121))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # SCRIPT_2 (login-and-raid.js) を実行
+            echo "Running SCRIPT_2 (1st time in cycle $i)..."
+            echo "$SCRIPT_2" > script_2.js
+            node script_2.js
+            
+            # 3〜5分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 121))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # SCRIPT_2 を再度実行
+            echo "Running SCRIPT_2 (2nd time in cycle $i)..."
+            node script_2.js
+          done
+          
+          echo "All cycles completed!"
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f script_1.js script_2.js
