@@ -22,7 +22,7 @@ jobs:
           SCRIPT_1: ${{ secrets.SCRIPT_1 }}
           SCRIPT_2: ${{ secrets.SCRIPT_2 }}
         run: |
-          # SCRIPT_1 (quest-and-raid-full.js) を実行
+          # SCRIPT_1 を実行
           echo "Running SCRIPT_1..."
           echo "$SCRIPT_1" > script_1.js
           node script_1.js
@@ -36,7 +36,7 @@ jobs:
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
             
-            # SCRIPT_2 (login-and-raid.js) を実行
+            # SCRIPT_2 を実行
             echo "Running SCRIPT_2 (1st time in cycle $i)..."
             echo "$SCRIPT_2" > script_2.js
             node script_2.js
