@@ -31,8 +31,8 @@ jobs:
           for i in {1..5}; do
             echo "=== Cycle $i/5 ==="
             
-            # 3〜5分のランダム待機
-            WAIT_TIME=$((180 + RANDOM % 121))
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
             
@@ -41,8 +41,8 @@ jobs:
             echo "$SCRIPT_4" > script_4.js
             node script_4.js
             
-            # 3〜5分のランダム待機
-            WAIT_TIME=$((180 + RANDOM % 121))
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
             
