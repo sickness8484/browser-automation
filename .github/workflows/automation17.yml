@@ -1,0 +1,58 @@
+name: Automation
+on:
+  workflow_dispatch:
+jobs:
+  run-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+      - name: Run automation scripts
+        env:
+          SCRIPT_9: ${{ secrets.SCRIPT_9 }}
+          SCRIPT_10: ${{ secrets.SCRIPT_10 }}
+        run: |
+          # SCRIPT_9 を実行
+          echo "Running SCRIPT_9..."
+          echo "$SCRIPT_9" > script_9.js
+          node script_9.js
+          
+          # 5回のループ
+          for i in {1..5}; do
+            echo "=== Cycle $i/5 ==="
+            
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # SCRIPT_10 を実行
+            echo "Running SCRIPT_10 (1st time in cycle $i)..."
+            echo "$SCRIPT_10" > script_10.js
+            node script_10.js
+            
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # SCRIPT_10 を再度実行
+            echo "Running SCRIPT_10 (2nd time in cycle $i)..."
+            node script_10.js
+          done
+          
+          echo "All cycles completed!"
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f script_9.js script_10.js
