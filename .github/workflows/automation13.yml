@@ -4,7 +4,7 @@ on:
 jobs:
   run-scripts:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 6
     
     steps:
       - name: Checkout repository
