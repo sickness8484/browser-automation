@@ -17,6 +17,13 @@ jobs:
         run: |
           npm install -D playwright
           npx playwright install chromium
+      - name: Create script files
+        env:
+          SCRIPT_X: ${{ secrets.SCRIPT_X }}
+          SCRIPT_Y: ${{ secrets.SCRIPT_Y }}
+        run: |
+          echo "$SCRIPT_X" > script_x.js
+          echo "$SCRIPT_Y" > script_y.js
       - name: Run automation scripts
         run: |
           # SCRIPT_X (quest-and-raid-full.js) を実行
