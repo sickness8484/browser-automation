@@ -1,0 +1,33 @@
+name: Guild Greeting Bot
+
+on:
+  workflow_dispatch:   # APIから叩けるようにする
+
+jobs:
+  run-greeting:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium
+
+      - name: Restore greeting script from secret
+        run: |
+          echo "$GREETING_JS" > greeting.js
+        env:
+          GREETING_JS: ${{ secrets.GREETING_JS }}
+
+      - name: Run greeting bot
+        run: |
+          node greeting.js
