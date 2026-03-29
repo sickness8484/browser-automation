@@ -1,0 +1,58 @@
+name: Automation
+on:
+  workflow_dispatch:
+jobs:
+  run-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+      - name: Run automation scripts
+        env:
+          QWERTY_SHINKOU_JS: ${{ secrets.QWERTY_SHINKOU_JS }}
+          QWERTY_KYUEN_JS: ${{ secrets.QWERTY_KYUEN_JS }}
+        run: |
+          # QWERTY_SHINKOU_JS を実行
+          echo "Running QWERTY_SHINKOU_JS..."
+          echo "$QWERTY_SHINKOU_JS" > qwerty_shinkou.js
+          node qwerty_shinkou.js
+          
+          # 5回のループ
+          for i in {1..5}; do
+            echo "=== Cycle $i/5 ==="
+            
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # QWERTY_KYUEN_JS を実行
+            echo "Running QWERTY_KYUEN_JS (1st time in cycle $i)..."
+            echo "$QWERTY_KYUEN_JS" > qwerty_kyuen.js
+            node qwerty_kyuen.js
+            
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # QWERTY_KYUEN_JS を再度実行
+            echo "Running QWERTY_KYUEN_JS (2nd time in cycle $i)..."
+            node qwerty_kyuen.js
+          done
+          
+          echo "All cycles completed!"
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f qwerty_shinkou.js qwerty_kyuen.js
