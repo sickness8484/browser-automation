@@ -1,0 +1,58 @@
+name: Automation
+on:
+  workflow_dispatch:
+jobs:
+  run-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+      - name: Run automation scripts
+        env:
+          HAKUGEI_SHINKOU_JS: ${{ secrets.HAKUGEI_SHINKOU_JS }}
+          HAKUGEI_KYUEN_JS: ${{ secrets.HAKUGEI_KYUEN_JS }}
+        run: |
+          # HAKUGEI_SHINKOU_JS を実行
+          echo "Running HAKUGEI_SHINKOU_JS..."
+          echo "$HAKUGEI_SHINKOU_JS" > hakugei_shinkou.js
+          node hakugei_shinkou.js
+          
+          # 5回のループ
+          for i in {1..5}; do
+            echo "=== Cycle $i/5 ==="
+            
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # HAKUGEI_KYUEN_JS を実行
+            echo "Running HAKUGEI_KYUEN_JS (1st time in cycle $i)..."
+            echo "$HAKUGEI_KYUEN_JS" > hakugei_kyuen.js
+            node hakugei_kyuen.js
+            
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # HAKUGEI_KYUEN_JS を再度実行
+            echo "Running HAKUGEI_KYUEN_JS (2nd time in cycle $i)..."
+            node hakugei_kyuen.js
+          done
+          
+          echo "All cycles completed!"
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f hakugei_shinkou.js hakugei_kyuen.js
