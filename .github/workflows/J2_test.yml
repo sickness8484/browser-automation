@@ -1,0 +1,60 @@
+name: Scheduled Task Runner
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        account: [JAR, YOTUN, ESUNOTO, UMEONIGIRI, URUKIORA, SEIRYU, JILT, TANUKI, DVA, SIGMA]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-v1
+          restore-keys: pw-${{ runner.os }}-
+
+      - name: Setup
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+
+      - name: Process
+        env:
+          TASK_A: ${{ secrets[format('{0}_SHINKOU_JS', matrix.account)] }}
+          TASK_B: ${{ secrets[format('{0}_KYUEN_JS',   matrix.account)] }}
+        run: |
+          echo "$TASK_A" > a.js
+          echo "$TASK_B" > b.js
+
+          INIT_WAIT=$((10 + RANDOM % 41))
+          sleep $INIT_WAIT
+
+          node a.js
+
+          for i in {1..4}; do
+            node b.js
+            if [ $i -lt 4 ]; then
+              WAIT=$((180 + RANDOM % 61))
+              sleep $WAIT
+            fi
+          done
+
+          FINAL_WAIT=$((120 + RANDOM % 61))
+          sleep $FINAL_WAIT
+          node b.js
+
+      - name: Cleanup
+        if: always()
+        run: rm -f a.js b.js
