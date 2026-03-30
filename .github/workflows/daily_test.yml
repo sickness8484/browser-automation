@@ -1,0 +1,23 @@
+name: Daily Test
+
+on:
+  workflow_dispatch:  # API or 手動実行
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run daily_test_js
+        env:
+          DAILY_TEST_JS: ${{ secrets.DAILY_TEST_JS }}
+        run: |
+          echo "Running daily_test_js..."
+          echo "$DAILY_TEST_JS" > daily_test.js
+          node daily_test.js
