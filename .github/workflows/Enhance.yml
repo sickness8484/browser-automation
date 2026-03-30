@@ -1,38 +1,29 @@
-name: Auto Enhance Runner
+name: Enhance Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  run-enhance:
+  run-script:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
+    timeout-minutes: 15
+
     steps:
-      - name: Setup Runtime
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
-      - name: Install Dependencies
+
+      - name: Install Playwright
         run: |
+          npm init -y
           npm install playwright
-          npx playwright install chromium --with-deps
-      
-      - name: Execute Task
+          npx playwright install chromium
+
+      - name: Run enhance_js
         env:
-          SCRIPT_CONTENT: ${{ secrets.SCRIPT_ENHANCE }}
+          ENHANCE_JS: ${{ secrets.ENHANCE_JS }}
         run: |
-          echo "[Task] Starting"
-          echo "$SCRIPT_CONTENT" > task.js
-          node task.js
-          rm task.js
-          echo "[Task] Completed"
-      
-      - name: Summary
-        if: always()
-        run: |
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "Task execution completed"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Running enhance_js..."
+          echo "$ENHANCE_JS" > enhance.js
+          node enhance.js
