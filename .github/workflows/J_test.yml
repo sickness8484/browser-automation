@@ -1,0 +1,68 @@
+name: Automation (Multi-Account)
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        account: [HAKUGEI, HEIGANI, QWERTY, SUZURI, WANTYOSU]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache Playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-v1
+          restore-keys: playwright-chromium-${{ runner.os }}-
+
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+
+      - name: Run ${{ matrix.account }}
+        env:
+          SHINKOU_JS: ${{ secrets[format('{0}_SHINKOU_JS', matrix.account)] }}
+          KYUEN_JS:   ${{ secrets[format('{0}_KYUEN_JS',   matrix.account)] }}
+        run: |
+          echo "$SHINKOU_JS" > shinkou.js
+          echo "$KYUEN_JS"   > kyuen.js
+
+          # 進行前: 10〜50秒のランダム遅延
+          INIT_WAIT=$((10 + RANDOM % 41))
+          echo "Initial delay: ${INIT_WAIT}s"
+          sleep $INIT_WAIT
+
+          node shinkou.js
+
+          for i in {1..4}; do
+            echo "--- kyuen $i/4 ---"
+            node kyuen.js
+            if [ $i -lt 4 ]; then
+              # 救援間隔: 3〜4分のランダム
+              WAIT=$((180 + RANDOM % 61))
+              echo "Waiting ${WAIT}s..."
+              sleep $WAIT
+            fi
+          done
+
+          # 最後の1回: 2〜3分のランダム遅延後にkyuen
+          FINAL_WAIT=$((120 + RANDOM % 61))
+          echo "Final wait: ${FINAL_WAIT}s before last kyuen..."
+          sleep $FINAL_WAIT
+          echo "--- kyuen 5/5 (final) ---"
+          node kyuen.js
+
+      - name: Cleanup
+        if: always()
+        run: rm -f shinkou.js kyuen.js
