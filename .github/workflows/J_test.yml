@@ -8,7 +8,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        account: [HAKUGEI, HEIGANI, QWERTY, SUZURI, WANTYOSU,SHAPO]
+        account: [HAKUGEI, HEIGANI, QWERTY, SUZURI, WANTYOSU, SHAPO]
       fail-fast: false
 
     steps:
