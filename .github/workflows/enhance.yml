@@ -1,0 +1,23 @@
+name: Enhance Test
+
+on:
+  workflow_dispatch:  # API / 手動実行
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run enhance_js
+        env:
+          ENHANCE_JS: ${{ secrets.ENHANCE_JS }}
+        run: |
+          echo "Running enhance_js..."
+          echo "$ENHANCE_JS" > enhance.js
+          node enhance.js
