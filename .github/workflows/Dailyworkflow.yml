@@ -1,36 +1,31 @@
-name: Daily Task Runner
+name: Automation
 on:
   workflow_dispatch:
-
 jobs:
-  run-daily-task:
+  run-scripts:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    
     steps:
-      - name: Setup Runtime
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
-      - name: Install Dependencies
+      - name: Install Playwright
         run: |
-          npm install playwright
-          npx playwright install chromium --with-deps
-      
-      - name: Execute Task
+          npm install -D playwright
+          npx playwright install chromium
+      - name: Run automation scripts
         env:
-          SCRIPT_BASE64: ${{ secrets.SCRIPT_C_BASE64 }}
+          DAILY_TASK_JS: ${{ secrets.DAILY_TASK_JS }}
         run: |
-          echo "[Task] Starting"
-          echo "$SCRIPT_BASE64" | base64 -d > task.js
-          node task.js
-          rm task.js
-          echo "[Task] Completed"
-      
-      - name: Summary
+          echo "Running DAILY_TASK_JS..."
+          echo "$DAILY_TASK_JS" > daily_task.js
+          node daily_task.js
+          echo "Completed!"
+      - name: Cleanup
         if: always()
         run: |
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "Task execution completed"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+          rm -f daily_task.js
