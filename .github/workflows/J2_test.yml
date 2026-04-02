@@ -1,60 +1,58 @@
-name: Scheduled Task Runner
+name: Automation
 on:
   workflow_dispatch:
-
 jobs:
-  run:
+  run-scripts:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      matrix:
-        account: [JAR, YOTUN, ESUNOTO, UMEONIGIRI, URUKIORA, SEIRYU, JILT, TANUKI, DVA, SIGMA]
-      fail-fast: false
-
+    
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: pw-${{ runner.os }}-v1
-          restore-keys: pw-${{ runner.os }}-
-
-      - name: Setup
+      - name: Install Playwright
         run: |
           npm install -D playwright
           npx playwright install chromium
-
-      - name: Process
+      - name: Run automation scripts
         env:
-          TASK_A: ${{ secrets[format('{0}_SHINKOU_JS', matrix.account)] }}
-          TASK_B: ${{ secrets[format('{0}_KYUEN_JS',   matrix.account)] }}
+          J2_TEST_JS: ${{ secrets.J2_TEST_JS }}
+          J2_KYUEN_JS: ${{ secrets.J2_KYUEN_JS }}
         run: |
-          echo "$TASK_A" > a.js
-          echo "$TASK_B" > b.js
-
-          INIT_WAIT=$((10 + RANDOM % 41))
-          sleep $INIT_WAIT
-
-          node a.js
-
-          for i in {1..4}; do
-            node b.js
-            if [ $i -lt 4 ]; then
-              WAIT=$((180 + RANDOM % 61))
-              sleep $WAIT
-            fi
+          # J2_TEST_JS を実行
+          echo "Running J2_TEST_JS..."
+          echo "$J2_TEST_JS" > j2_test.js
+          node j2_test.js
+          
+          # 5回のループ
+          for i in {1..5}; do
+            echo "=== Cycle $i/5 ==="
+            
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # J2_KYUEN_JS を実行
+            echo "Running J2_KYUEN_JS (1st time in cycle $i)..."
+            echo "$J2_KYUEN_JS" > j2_kyuen.js
+            node j2_kyuen.js
+            
+            # 3〜4分のランダム待機
+            WAIT_TIME=$((180 + RANDOM % 61))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            # J2_KYUEN_JS を再度実行
+            echo "Running J2_KYUEN_JS (2nd time in cycle $i)..."
+            node j2_kyuen.js
           done
-
-          FINAL_WAIT=$((120 + RANDOM % 61))
-          sleep $FINAL_WAIT
-          node b.js
-
+          
+          echo "All cycles completed!"
       - name: Cleanup
         if: always()
-        run: rm -f a.js b.js
+        run: |
+          rm -f j2_test.js j2_kyuen.js
