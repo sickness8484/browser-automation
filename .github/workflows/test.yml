@@ -1,0 +1,32 @@
+name: Test Script
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium
+
+      - name: Run TEST_JS
+        env:
+          TEST_JS: ${{ secrets.TEST_JS }}
+        run: |
+          echo "Running TEST_JS..."
+          echo "$TEST_JS" > test.js
+          node test.js
