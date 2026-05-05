@@ -1,0 +1,59 @@
+name: Run Holywar Scripts
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-sub-holywar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium
+
+      - name: Run SUB_HOLYWAR_JS
+        env:
+          SUB_HOLYWAR_JS: ${{ secrets.SUB_HOLYWAR_JS }}
+        run: |
+          echo "Running SUB_HOLYWAR_JS..."
+          echo "$SUB_HOLYWAR_JS" > sub_holywar.js
+          node sub_holywar.js
+
+  run-sub2-holywar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium
+
+      - name: Run SUB2_HOLYWAR_JS
+        env:
+          SUB2_HOLYWAR_JS: ${{ secrets.SUB2_HOLYWAR_JS }}
+        run: |
+          echo "Running SUB2_HOLYWAR_JS..."
+          echo "$SUB2_HOLYWAR_JS" > sub2_holywar.js
+          node sub2_holywar.js
