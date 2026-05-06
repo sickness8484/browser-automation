@@ -1,0 +1,53 @@
+name: Automation
+on:
+  workflow_dispatch:
+jobs:
+  run-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+
+      - name: Run suhai2 scripts in parallel
+        env:
+          KABE_SUHAI2_JS: ${{ secrets.KABE_SUHAI2_JS }}
+          AT_SUHAI2_JS: ${{ secrets.AT_SUHAI2_JS }}
+        run: |
+          echo "$KABE_SUHAI2_JS" > kabe_suhai2.js
+          echo "$AT_SUHAI2_JS" > at_suhai2.js
+          echo "Running kabe_suhai2 and at_suhai2 in parallel..."
+          node kabe_suhai2.js & PID1=$!
+          node at_suhai2.js & PID2=$!
+          wait $PID1
+          wait $PID2
+          echo "Both suhai2 scripts completed!"
+
+      - name: Run suhaigo scripts in parallel
+        env:
+          KABE_SUHAIGO_JS: ${{ secrets.KABE_SUHAIGO_JS }}
+          AT_SUHAIGO_JS: ${{ secrets.AT_SUHAIGO_JS }}
+        run: |
+          echo "$KABE_SUHAIGO_JS" > kabe_suhaigo.js
+          echo "$AT_SUHAIGO_JS" > at_suhaigo.js
+          echo "Running kabe_suhaigo and at_suhaigo in parallel..."
+          node kabe_suhaigo.js & PID1=$!
+          node at_suhaigo.js & PID2=$!
+          wait $PID1
+          wait $PID2
+          echo "Both suhaigo scripts completed!"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f kabe_suhai2.js at_suhai2.js kabe_suhaigo.js at_suhaigo.js
