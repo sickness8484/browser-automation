@@ -1,0 +1,53 @@
+name: Automation
+on:
+  workflow_dispatch:
+jobs:
+  run-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+      - name: Run automation scripts
+        env:
+          J3_TEST_JS: ${{ secrets.J3_TEST_JS }}
+          J3_KYUEN_JS: ${{ secrets.J3_KYUEN_JS }}
+        run: |
+          echo "$J3_TEST_JS" > j3_test.js
+          echo "$J3_KYUEN_JS" > j3_kyuen.js
+          
+          # ── 事前実行 ─────────────────────────
+          echo "Running J3_TEST_JS..."
+          node j3_test.js
+          
+          # ── 8回のループ ─────────────────────────
+          for i in {1..8}; do
+            echo "=== Cycle $i/8 ==="
+            
+            WAIT_TIME=$((120 + RANDOM % 60))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            
+            echo "Running J3_KYUEN_JS (1/2 in cycle $i)..."
+            node j3_kyuen.js
+            WAIT_TIME=$((60 + RANDOM % 31))
+            echo "Waiting ${WAIT_TIME} seconds..."
+            sleep $WAIT_TIME
+            echo "Running J3_KYUEN_JS (2/2 in cycle $i)..."
+            node j3_kyuen.js
+          done
+          
+          echo "All done!"
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f j3_test.js j3_kyuen.js
