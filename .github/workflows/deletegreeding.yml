@@ -1,0 +1,37 @@
+name: Automation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+
+      - name: Run automation scripts
+        env:
+          DELETE_GREEDING_JS: ${{ secrets.DELETE_GREEDING_JS }}
+        run: |
+          echo "Running DELETE_GREEDING_JS..."
+          echo "$DELETE_GREEDING_JS" > delete_greeding.js
+          node delete_greeding.js
+          echo "Completed!"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f delete_greeding.js
