@@ -1,0 +1,34 @@
+name: Automation
+on:
+  workflow_dispatch:
+jobs:
+  run-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: |
+          npm install -D playwright
+          npx playwright install chromium
+      - name: Run automation scripts
+        env:
+          ENHANCE_SKILL_TRAINER_JS: ${{ secrets.ENHANCE_SKILL_TRAINER_JS }}
+        run: |
+          echo "$ENHANCE_SKILL_TRAINER_JS" > enhance_skill_trainer_js
+          
+          # ── 事前実行 ─────────────────────────
+          echo "Running ENHANCE_SKILL_TRAINER_JS..."
+          node enhance_skill_trainer_js
+          
+          echo "All done!"
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f enhance_skill_trainer_js
