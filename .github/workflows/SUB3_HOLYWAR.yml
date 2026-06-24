@@ -1,67 +1,26 @@
-name: Automation
-2
+name: Daily Test
+
 on:
-3
   workflow_dispatch:
-4
+
 jobs:
-5
-  run-scripts:
-6
+  run-script:
     runs-on: ubuntu-latest
-7
     timeout-minutes: 30
-8
-    
-9
+
     steps:
-10
-      - name: Checkout repository
-11
-        uses: actions/checkout@v4
-12
-      - name: Setup Node.js
-13
-        uses: actions/setup-node@v4
-14
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-15
           node-version: '20'
-16
-      - name: Install Playwright
-17
-        run: |
-18
-          npm install -D playwright
-19
-          npx playwright install chromium
-20
-      - name: Run automation scripts
-21
-        env:
-22
+
+      - run: npm init -y && npm install playwright
+
+      - run: npx playwright install --with-deps
+
+      - env:
           SUB3_HOLYWAR_JS: ${{ secrets.SUB3_HOLYWAR_JS }}
-23
         run: |
-24
-          echo "$SUB3_HOLYWAR_JS" > sub3_holywar_js
-25
-          
-26
-          # ── 事前実行 ─────────────────────────
-27
-          echo "Running SUB3_HOLYWAR_JS..."
-28
-          node sub3_holywar_js
-29
-          
-30
-          echo "All done!"
-31
-      - name: Cleanup
-32
-        if: always()
-33
-        run: |
-34
-          rm -f sub3_holywar_js
+          echo "$SUB3_HOLYWAR_JS" > sub3_holywar.js
+          node sub3_holywar.js
