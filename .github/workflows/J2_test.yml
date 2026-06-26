@@ -4,7 +4,7 @@ on:
 jobs:
   run-scripts:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     
     steps:
       - name: Checkout repository
@@ -22,36 +22,31 @@ jobs:
           J2_TEST_JS: ${{ secrets.J2_TEST_JS }}
           J2_KYUEN_JS: ${{ secrets.J2_KYUEN_JS }}
         run: |
-          # J2_TEST_JS を実行
-          echo "Running J2_TEST_JS..."
           echo "$J2_TEST_JS" > j2_test.js
+          echo "$J2_KYUEN_JS" > j2_kyuen.js
+          
+          # ── 事前実行 ─────────────────────────
+          echo "Running J2_TEST_JS..."
           node j2_test.js
           
-          # 5回のループ
-          for i in {1..5}; do
-            echo "=== Cycle $i/5 ==="
+          # ── 10回のループ ─────────────────────────
+          for i in {1..10}; do
+            echo "=== Cycle $i/10 ==="
             
-            # 3〜4分のランダム待機
-            WAIT_TIME=$((180 + RANDOM % 61))
+            WAIT_TIME=$((60 + RANDOM % 60))
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
             
-            # J2_KYUEN_JS を実行
-            echo "Running J2_KYUEN_JS (1st time in cycle $i)..."
-            echo "$J2_KYUEN_JS" > j2_kyuen.js
+            echo "Running J2_KYUEN_JS (1/2 in cycle $i)..."
             node j2_kyuen.js
-            
-            # 3〜4分のランダム待機
-            WAIT_TIME=$((180 + RANDOM % 61))
+            WAIT_TIME=$((60 + RANDOM % 31))
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
-            
-            # J2_KYUEN_JS を再度実行
-            echo "Running J2_KYUEN_JS (2nd time in cycle $i)..."
+            echo "Running J2_KYUEN_JS (2/2 in cycle $i)..."
             node j2_kyuen.js
           done
           
-          echo "All cycles completed!"
+          echo "All done!"
       - name: Cleanup
         if: always()
         run: |
