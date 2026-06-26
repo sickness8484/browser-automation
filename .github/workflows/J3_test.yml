@@ -29,11 +29,11 @@ jobs:
           echo "Running J3_TEST_JS..."
           node j3_test.js
           
-          # ── 8回のループ ─────────────────────────
-          for i in {1..8}; do
-            echo "=== Cycle $i/8 ==="
+          # ── 10回のループ ─────────────────────────
+          for i in {1..10}; do
+            echo "=== Cycle $i/10 ==="
             
-            WAIT_TIME=$((120 + RANDOM % 60))
+            WAIT_TIME=$((60 + RANDOM % 60))
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
             
