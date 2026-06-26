@@ -29,20 +29,15 @@ jobs:
           echo "Running J1_TEST_JS..."
           node j1_test.js
           
-          # ── 10回のループ ─────────────────────────
+          # ── 繰り返し実行: 10回 ─────────────────────────
           for i in {1..10}; do
-            echo "=== Cycle $i/10 ==="
+            echo "=== Repeat $i/10 ==="
             
-            WAIT_TIME=$((60 + RANDOM % 70))
+            WAIT_TIME=$((60 + RANDOM % 60))
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
             
-            echo "Running J1_KYUEN_JS (1/2 in cycle $i)..."
-            node j1_kyuen.js
-            WAIT_TIME=$((60 + RANDOM % 31))
-            echo "Waiting ${WAIT_TIME} seconds..."
-            sleep $WAIT_TIME
-            echo "Running J1_KYUEN_JS (2/2 in cycle $i)..."
+            echo "Running J1_KYUEN_JS ($i/10)..."
             node j1_kyuen.js
           done
           
