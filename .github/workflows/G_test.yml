@@ -29,20 +29,15 @@ jobs:
           echo "Running GOLD_SHINKOU_JS..."
           node gold_shinkou.js
           
-          # ── 7回のループ ─────────────────────────
-          for i in {1..7}; do
-            echo "=== Cycle $i/7 ==="
+          # ── 繰り返し実行: 10回 ─────────────────────────
+          for i in {1..10}; do
+            echo "=== Repeat $i/10 ==="
             
             WAIT_TIME=$((60 + RANDOM % 60))
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
             
-            echo "Running GOLD_KYUEN_JS (1/2 in cycle $i)..."
-            node gold_kyuen.js
-            WAIT_TIME=$((120 + RANDOM % 61))
-            echo "Waiting ${WAIT_TIME} seconds..."
-            sleep $WAIT_TIME
-            echo "Running GOLD_KYUEN_JS (2/2 in cycle $i)..."
+            echo "Running GOLD_KYUEN_JS ($i/10)..."
             node gold_kyuen.js
           done
           
