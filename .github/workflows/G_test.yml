@@ -16,33 +16,44 @@ jobs:
       - name: Install Playwright
         run: |
           npm install -D playwright
-          npx playwright install chromium
+          npx playwright install --with-deps chromium
       - name: Run automation scripts
         env:
-          GOLD_SHINKOU_JS: ${{ secrets.GOLD_SHINKOU_JS }}
-          GOLD_KYUEN_JS: ${{ secrets.GOLD_KYUEN_JS }}
+          G1_TEST_JS: ${{ secrets.G1_TEST_JS }}
+          G1_KYUEN_JS: ${{ secrets.G1_KYUEN_JS }}
         run: |
-          echo "$GOLD_SHINKOU_JS" > gold_shinkou.js
-          echo "$GOLD_KYUEN_JS" > gold_kyuen.js
+          set +e
+          run_node_safe() {
+            local label="$1"
+            local file="$2"
+            echo "Running ${label}..."
+            node "$file"
+            local code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::warning title=${label} failed::exit code ${code}"
+            fi
+            return 0
+          }
+          
+          printf '%s\n' "$G1_TEST_JS" > g1_test.js
+          printf '%s\n' "$G1_KYUEN_JS" > g1_kyuen.js
           
           # ── 事前実行 ─────────────────────────
-          echo "Running GOLD_SHINKOU_JS..."
-          node gold_shinkou.js
+          run_node_safe G1_TEST_JS g1_test.js
           
-          # ── 繰り返し実行: 10回 ─────────────────────────
-          for i in {1..10}; do
-            echo "=== Repeat $i/10 ==="
+          # ── 繰り返し実行: 7回 ─────────────────────────
+          for i in {1..7}; do
+            echo "=== Repeat $i/7 ==="
             
-            WAIT_TIME=$((60 + RANDOM % 60))
+            WAIT_TIME=$((90 + RANDOM % 30))
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
             
-            echo "Running GOLD_KYUEN_JS ($i/10)..."
-            node gold_kyuen.js
+            run_node_safe G1_KYUEN_JS g1_kyuen.js
           done
           
           echo "All done!"
       - name: Cleanup
         if: always()
         run: |
-          rm -f gold_shinkou.js gold_kyuen.js
+          rm -f g1_test.js g1_kyuen.js
