@@ -16,34 +16,40 @@ jobs:
       - name: Install Playwright
         run: |
           npm install -D playwright
-          npx playwright install chromium
+          npx playwright install --with-deps chromium
       - name: Run automation scripts
         env:
           G3_TEST_JS: ${{ secrets.G3_TEST_JS }}
           G3_KYUEN_JS: ${{ secrets.G3_KYUEN_JS }}
         run: |
-          echo "$G3_TEST_JS" > g3_test.js
-          echo "$G3_KYUEN_JS" > g3_kyuen.js
+          set +e
+          run_node_safe() {
+            local label="$1"
+            local file="$2"
+            echo "Running ${label}..."
+            node "$file"
+            local code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::warning title=${label} failed::exit code ${code}"
+            fi
+            return 0
+          }
+          
+          printf '%s\n' "$G3_TEST_JS" > g3_test.js
+          printf '%s\n' "$G3_KYUEN_JS" > g3_kyuen.js
           
           # ── 事前実行 ─────────────────────────
-          echo "Running G3_TEST_JS..."
-          node g3_test.js
+          run_node_safe G3_TEST_JS g3_test.js
           
-          # ── 8回のループ ─────────────────────────
-          for i in {1..8}; do
-            echo "=== Cycle $i/8 ==="
+          # ── 繰り返し実行: 7回 ─────────────────────────
+          for i in {1..7}; do
+            echo "=== Repeat $i/7 ==="
             
-            WAIT_TIME=$((110 + RANDOM % 60))
+            WAIT_TIME=$((90 + RANDOM % 30))
             echo "Waiting ${WAIT_TIME} seconds..."
             sleep $WAIT_TIME
             
-            echo "Running G3_KYUEN_JS (1/2 in cycle $i)..."
-            node g3_kyuen.js
-            WAIT_TIME=$((60 + RANDOM % 31))
-            echo "Waiting ${WAIT_TIME} seconds..."
-            sleep $WAIT_TIME
-            echo "Running G3_KYUEN_JS (2/2 in cycle $i)..."
-            node g3_kyuen.js
+            run_node_safe G3_KYUEN_JS g3_kyuen.js
           done
           
           echo "All done!"
