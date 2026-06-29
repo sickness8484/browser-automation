@@ -20,42 +20,34 @@ jobs:
           import json, os, sys
 
           raw = os.environ.get('DATA', '').replace('\r', '').strip()
+          print('DATA length =', len(raw))
+
           if not raw:
               print('parse error: DATA is empty', file=sys.stderr)
               sys.exit(1)
 
-          group_size_raw = os.environ.get('GROUP_SIZE') or '3'
-          try:
-              group_size = int(group_size_raw)
-              if group_size <= 0:
-                  raise ValueError
-          except ValueError:
-              print('parse error: GROUP_SIZE must be positive integer', file=sys.stderr)
-              sys.exit(1)
+          group_size = int(os.environ.get('GROUP_SIZE') or 3)
 
           blocks = [b.strip() for b in raw.split('---')]
+          print('blocks =', len(blocks))
+
           if len(blocks) < 3:
-              print('parse error: DATA must be 3 blocks: urls --- names --- emails', file=sys.stderr)
+              print('parse error: DATA must be urls --- names --- emails', file=sys.stderr)
               sys.exit(1)
 
           urls = [s.strip() for s in blocks[0].splitlines() if s.strip()]
           names = [s.strip() for s in blocks[1].splitlines() if s.strip()]
           emails = [s.strip() for s in blocks[2].splitlines() if s.strip()]
 
+          print('urls=', len(urls), 'names=', len(names), 'emails=', len(emails))
+
           count = min(len(urls), len(names), len(emails))
           if count == 0:
               print('parse error: no valid accounts', file=sys.stderr)
               sys.exit(1)
 
-          if len(urls) != len(names) or len(urls) != len(emails):
-              print(f'warning: length mismatch urls={len(urls)} names={len(names)} emails={len(emails)}; using count={count}')
-
           accounts = [
-              {
-                  'url': urls[i],
-                  'name': names[i],
-                  'email': emails[i]
-              }
+              {'url': urls[i], 'name': names[i], 'email': emails[i]}
               for i in range(count)
           ]
 
@@ -64,16 +56,20 @@ jobs:
               groups.append({'accounts': accounts[i:i + group_size]})
 
           matrix = json.dumps({'group': groups}, ensure_ascii=False)
-          print(f'total={count} groups={len(groups)}')
-          print(matrix)
+
+          print('MATRIX=', matrix)
 
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
-              f.write(f'matrix={matrix}\n')
+              f.write('matrix=' + matrix + '\n')
           PYEOF
+
+      - name: debug output
+        run: |
+          echo 'matrix output:'
+          echo '${{ steps.parse.outputs.matrix }}'
 
   run:
     needs: prepare
-    if: needs.prepare.outputs.matrix != ''
     strategy:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
       max-parallel: 20
@@ -108,13 +104,11 @@ jobs:
           import json, os, subprocess, sys, time
 
           accounts = json.loads(os.environ['GROUP_JSON'])
-          wait_sec = int(os.environ.get('WAIT_SEC') or 3)
-
+          wait_sec = 3
           results = []
 
           for i, acct in enumerate(accounts):
               print(f'[{i+1}/{len(accounts)}] {acct["name"]}')
-              sys.stdout.flush()
 
               env = {
                   **os.environ,
