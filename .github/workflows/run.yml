@@ -4,24 +4,50 @@ on:
   workflow_dispatch:
 
 jobs:
-  prepare:
+  run:
+    strategy:
+      matrix:
+        group_index:
+          - 0
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
+          - 10
+          - 11
+          - 12
+          - 13
+          - 14
+          - 15
+          - 16
+          - 17
+          - 18
+          - 19
+      max-parallel: 20
+      fail-fast: false
+
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.parse.outputs.matrix }}
 
     steps:
-      - name: parse matrix
-        id: parse
+      - name: select group
+        id: pick
         env:
           DATA: ${{ secrets.DATA }}
           GROUP_SIZE: ${{ secrets.GROUP_SIZE }}
+          GROUP_INDEX: ${{ matrix.group_index }}
+          STATIC_GROUPS: 20
         run: |
           python3 << 'PYEOF'
-          import json, os, sys, math
+          import json, os, sys
 
           raw = os.environ.get('DATA', '').replace('\r', '').strip()
           if not raw:
-              print('parse error: DATA is empty', file=sys.stderr)
+              print('select error: DATA is empty', file=sys.stderr)
               sys.exit(1)
 
           group_size_raw = os.environ.get('GROUP_SIZE') or '3'
@@ -30,12 +56,15 @@ jobs:
               if group_size <= 0:
                   raise ValueError
           except ValueError:
-              print('parse error: GROUP_SIZE must be positive integer', file=sys.stderr)
+              print('select error: GROUP_SIZE must be positive integer', file=sys.stderr)
               sys.exit(1)
+
+          group_index = int(os.environ.get('GROUP_INDEX') or 0)
+          static_groups = int(os.environ.get('STATIC_GROUPS') or 20)
 
           blocks = [b.strip() for b in raw.split('---')]
           if len(blocks) < 3:
-              print('parse error: DATA must be 3 blocks: urls --- names --- emails', file=sys.stderr)
+              print('select error: DATA must be 3 blocks: urls --- names --- emails', file=sys.stderr)
               sys.exit(1)
 
           urls = [s.strip() for s in blocks[0].splitlines() if s.strip()]
@@ -44,86 +73,23 @@ jobs:
 
           count = min(len(urls), len(names), len(emails))
           if count == 0:
-              print('parse error: no valid accounts', file=sys.stderr)
+              print('select error: no valid accounts', file=sys.stderr)
               sys.exit(1)
 
-          group_count = math.ceil(count / group_size)
+          capacity = static_groups * group_size
+          if group_index == 0:
+              print(f'total_accounts={count}')
+              print(f'group_size={group_size}')
+              print(f'static_groups={static_groups}')
+              print(f'capacity={capacity}')
 
-          # 重要:
-          # ここには Secret の中身を絶対に入れない。
-          # GitHub Actions が secret 混入と判定すると output が空になる。
-          matrix = {
-              'group': [
-                  {'index': i}
-                  for i in range(group_count)
-              ]
-          }
+              if len(urls) != len(names) or len(urls) != len(emails):
+                  print(f'warning: length mismatch urls={len(urls)} names={len(names)} emails={len(emails)}; using count={count}')
 
-          print(f'total_accounts={count}')
-          print(f'group_size={group_size}')
-          print(f'group_count={group_count}')
+              if count > capacity:
+                  print(f'capacity error: DATA has {count} accounts, but this workflow can process only {capacity}. Increase group_index list or GROUP_SIZE.', file=sys.stderr)
+                  sys.exit(1)
 
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
-              f.write('matrix=' + json.dumps(matrix) + '\n')
-          PYEOF
-
-  run:
-    needs: prepare
-
-    strategy:
-      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
-      max-parallel: 20
-      fail-fast: false
-
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: setup script
-        env:
-          SCRIPT: ${{ secrets.SCRIPT }}
-        run: |
-          printf '%s' "$SCRIPT" > worker.js
-
-      - name: install
-        run: |
-          npm init -y
-          npm install playwright
-          npx playwright install chromium --with-deps
-
-      - name: exec
-        env:
-          BASE_URL: ${{ secrets.BASE_URL }}
-          PASS: ${{ secrets.COMMON_PASS }}
-          DATA: ${{ secrets.DATA }}
-          GROUP_SIZE: ${{ secrets.GROUP_SIZE }}
-          GROUP_INDEX: ${{ matrix.group.index }}
-        run: |
-          python3 << 'PYEOF'
-          import json, os, subprocess, sys, time
-
-          raw = os.environ.get('DATA', '').replace('\r', '').strip()
-          if not raw:
-              print('exec error: DATA is empty', file=sys.stderr)
-              sys.exit(1)
-
-          group_size = int(os.environ.get('GROUP_SIZE') or 3)
-          group_index = int(os.environ.get('GROUP_INDEX') or 0)
-
-          blocks = [b.strip() for b in raw.split('---')]
-          if len(blocks) < 3:
-              print('exec error: DATA must be 3 blocks: urls --- names --- emails', file=sys.stderr)
-              sys.exit(1)
-
-          urls = [s.strip() for s in blocks[0].splitlines() if s.strip()]
-          names = [s.strip() for s in blocks[1].splitlines() if s.strip()]
-          emails = [s.strip() for s in blocks[2].splitlines() if s.strip()]
-
-          count = min(len(urls), len(names), len(emails))
           accounts = [
               {
                   'url': urls[i],
@@ -138,17 +104,68 @@ jobs:
           group_accounts = accounts[start:end]
 
           if not group_accounts:
-              print(f'group {group_index}: no accounts')
+              print(f'group_index={group_index}: no accounts. skip.')
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+                  f.write('has_accounts=false\n')
               sys.exit(0)
 
-          wait_sec = int(os.environ.get('WAIT_SEC') or 3)
-          results = []
+          with open('group.json', 'w', encoding='utf-8') as f:
+              json.dump(group_accounts, f, ensure_ascii=False)
 
           print(f'group_index={group_index}')
           print(f'accounts_in_group={len(group_accounts)}')
 
-          for i, acct in enumerate(group_accounts):
-              print(f'[{i+1}/{len(group_accounts)}] {acct["name"]}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write('has_accounts=true\n')
+          PYEOF
+
+      - name: setup node
+        if: steps.pick.outputs.has_accounts == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: setup script
+        if: steps.pick.outputs.has_accounts == 'true'
+        env:
+          SCRIPT: ${{ secrets.SCRIPT }}
+        run: |
+          printf '%s' "$SCRIPT" > worker.js
+
+          if grep -q "dragoncraze.com/i/" worker.js; then
+            echo "::error title=SCRIPT secret error::SCRIPTにDATAの招待URLが入っています。SCRIPTにはworker.jsのコードだけを入れてください。"
+            exit 1
+          fi
+
+          node --check worker.js
+
+      - name: install
+        if: steps.pick.outputs.has_accounts == 'true'
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: exec
+        if: steps.pick.outputs.has_accounts == 'true'
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          PASS: ${{ secrets.COMMON_PASS }}
+          WAIT_SEC: ${{ secrets.WAIT_SEC }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, subprocess, sys, time
+
+          with open('group.json', 'r', encoding='utf-8') as f:
+              accounts = json.load(f)
+
+          wait_sec = int(os.environ.get('WAIT_SEC') or 3)
+          results = []
+
+          print(f'accounts_in_group={len(accounts)}')
+
+          for i, acct in enumerate(accounts):
+              print(f'[{i+1}/{len(accounts)}] {acct["name"]}')
               sys.stdout.flush()
 
               env = {
@@ -159,14 +176,14 @@ jobs:
               }
 
               ret = subprocess.run(['node', 'worker.js'], env=env)
-
               status = 'ok' if ret.returncode == 0 else 'fail'
+
               results.append({
                   'name': acct['name'],
                   'status': status,
               })
 
-              if i < len(group_accounts) - 1:
+              if i < len(accounts) - 1:
                   time.sleep(wait_sec)
 
           print('\n-- summary --')
