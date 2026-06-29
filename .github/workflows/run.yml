@@ -1,110 +1,139 @@
 name: runner
 
 on:
- workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
- prepare:
-   runs-on: ubuntu-latest
-   outputs:
-     matrix: ${{ steps.parse.outputs.matrix }}
-   steps:
-     - name: parse
-       id: parse
-       env:
-         DATA:       ${{ secrets.DATA }}
-         GROUP_SIZE: ${{ secrets.GROUP_SIZE }}
-       run: |
-         python3 << 'PYEOF'
-         import json, os, sys
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.parse.outputs.matrix }}
 
-         raw        = os.environ['DATA']
-         group_size = int(os.environ.get('GROUP_SIZE') or 3)
+    steps:
+      - name: parse
+        id: parse
+        env:
+          DATA: ${{ secrets.DATA }}
+          GROUP_SIZE: ${{ secrets.GROUP_SIZE }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, sys
 
-         blocks = [b.strip() for b in raw.split('---')]
-         if len(blocks) < 3:
-             print('parse error', file=sys.stderr)
-             sys.exit(1)
+          raw = os.environ.get('DATA', '').replace('\r', '').strip()
+          if not raw:
+              print('parse error: DATA is empty', file=sys.stderr)
+              sys.exit(1)
 
-         urls   = [s.strip() for s in blocks[0].splitlines() if s.strip()]
-         names  = [s.strip() for s in blocks[1].splitlines() if s.strip()]
-         emails = [s.strip() for s in blocks[2].splitlines() if s.strip()]
+          group_size_raw = os.environ.get('GROUP_SIZE') or '3'
+          try:
+              group_size = int(group_size_raw)
+              if group_size <= 0:
+                  raise ValueError
+          except ValueError:
+              print('parse error: GROUP_SIZE must be positive integer', file=sys.stderr)
+              sys.exit(1)
 
-         count = min(len(urls), len(names), len(emails))
-         if count == 0:
-             print('empty', file=sys.stderr)
-             sys.exit(1)
+          blocks = [b.strip() for b in raw.split('---')]
+          if len(blocks) < 3:
+              print('parse error: DATA must be 3 blocks: urls --- names --- emails', file=sys.stderr)
+              sys.exit(1)
 
-         accounts = [
-             {'url': urls[i], 'name': names[i], 'email': emails[i]}
-             for i in range(count)
-         ]
+          urls = [s.strip() for s in blocks[0].splitlines() if s.strip()]
+          names = [s.strip() for s in blocks[1].splitlines() if s.strip()]
+          emails = [s.strip() for s in blocks[2].splitlines() if s.strip()]
 
-         groups = []
-         for i in range(0, len(accounts), group_size):
-             groups.append({'accounts': accounts[i:i + group_size]})
+          count = min(len(urls), len(names), len(emails))
+          if count == 0:
+              print('parse error: no valid accounts', file=sys.stderr)
+              sys.exit(1)
 
-         print(f'total={count} groups={len(groups)}')
+          if len(urls) != len(names) or len(urls) != len(emails):
+              print(f'warning: length mismatch urls={len(urls)} names={len(names)} emails={len(emails)}; using count={count}')
 
-         with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-             f.write(f'matrix={json.dumps({"group": groups})}\n')
-         PYEOF
+          accounts = [
+              {
+                  'url': urls[i],
+                  'name': names[i],
+                  'email': emails[i]
+              }
+              for i in range(count)
+          ]
 
- run:
-   needs: prepare
-   strategy:
-     matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
-     max-parallel: 20
-     fail-fast: false
-   runs-on: ubuntu-latest
+          groups = []
+          for i in range(0, len(accounts), group_size):
+              groups.append({'accounts': accounts[i:i + group_size]})
 
-   steps:
-     - name: setup
-       env:
-         SCRIPT: ${{ secrets.SCRIPT }}
-       run: |
-         echo "$SCRIPT" > worker.js
+          matrix = json.dumps({'group': groups}, ensure_ascii=False)
+          print(f'total={count} groups={len(groups)}')
+          print(matrix)
 
-     - name: install
-       run: |
-         npm install playwright
-         npx playwright install chromium --with-deps
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f'matrix={matrix}\n')
+          PYEOF
 
-     - name: exec
-       env:
-         BASE_URL:   ${{ secrets.BASE_URL }}
-         PASS:       ${{ secrets.COMMON_PASS }}
-         GROUP_JSON: ${{ toJson(matrix.group.accounts) }}
-       run: |
-         python3 << 'PYEOF'
-         import json, os, subprocess, sys, time
+  run:
+    needs: prepare
+    if: needs.prepare.outputs.matrix != ''
+    strategy:
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+      max-parallel: 20
+      fail-fast: false
 
-         accounts = json.loads(os.environ['GROUP_JSON'])
-         wait_sec = 3
+    runs-on: ubuntu-latest
 
-         results = []
-         for i, acct in enumerate(accounts):
-             print(f'[{i+1}/{len(accounts)}] {acct["name"]}')
-             sys.stdout.flush()
+    steps:
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-             env = {
-                 **os.environ,
-                 'ENTRY_URL': acct['url'],
-                 'HANDLE':    acct['name'],
-                 'MAIL':      acct['email'],
-             }
+      - name: setup script
+        env:
+          SCRIPT: ${{ secrets.SCRIPT }}
+        run: |
+          printf '%s' "$SCRIPT" > worker.js
 
-             ret    = subprocess.run(['node', 'worker.js'], env=env)
-             status = 'ok' if ret.returncode == 0 else 'fail'
-             results.append({'name': acct['name'], 'status': status})
+      - name: install
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
 
-             if i < len(accounts) - 1:
-                 time.sleep(wait_sec)
+      - name: exec
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          PASS: ${{ secrets.COMMON_PASS }}
+          GROUP_JSON: ${{ toJson(matrix.group.accounts) }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, subprocess, sys, time
 
-         print('\n-- summary --')
-         for r in results:
-             print(f'{"✅" if r["status"] == "ok" else "❌"} {r["name"]}')
+          accounts = json.loads(os.environ['GROUP_JSON'])
+          wait_sec = int(os.environ.get('WAIT_SEC') or 3)
 
-         if any(r['status'] == 'fail' for r in results):
-             sys.exit(1)
-         PYEOF
+          results = []
+
+          for i, acct in enumerate(accounts):
+              print(f'[{i+1}/{len(accounts)}] {acct["name"]}')
+              sys.stdout.flush()
+
+              env = {
+                  **os.environ,
+                  'ENTRY_URL': acct['url'],
+                  'HANDLE': acct['name'],
+                  'MAIL': acct['email'],
+              }
+
+              ret = subprocess.run(['node', 'worker.js'], env=env)
+              status = 'ok' if ret.returncode == 0 else 'fail'
+              results.append({'name': acct['name'], 'status': status})
+
+              if i < len(accounts) - 1:
+                  time.sleep(wait_sec)
+
+          print('\n-- summary --')
+          for r in results:
+              print(f'{"✅" if r["status"] == "ok" else "❌"} {r["name"]}')
+
+          if any(r['status'] == 'fail' for r in results):
+              sys.exit(1)
+          PYEOF
