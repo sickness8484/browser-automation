@@ -1,0 +1,110 @@
+name: runner
+
+on:
+ workflow_dispatch:
+
+jobs:
+ prepare:
+   runs-on: ubuntu-latest
+   outputs:
+     matrix: ${{ steps.parse.outputs.matrix }}
+   steps:
+     - name: parse
+       id: parse
+       env:
+         DATA:       ${{ secrets.DATA }}
+         GROUP_SIZE: ${{ secrets.GROUP_SIZE }}
+       run: |
+         python3 << 'PYEOF'
+         import json, os, sys
+
+         raw        = os.environ['DATA']
+         group_size = int(os.environ.get('GROUP_SIZE') or 3)
+
+         blocks = [b.strip() for b in raw.split('---')]
+         if len(blocks) < 3:
+             print('parse error', file=sys.stderr)
+             sys.exit(1)
+
+         urls   = [s.strip() for s in blocks[0].splitlines() if s.strip()]
+         names  = [s.strip() for s in blocks[1].splitlines() if s.strip()]
+         emails = [s.strip() for s in blocks[2].splitlines() if s.strip()]
+
+         count = min(len(urls), len(names), len(emails))
+         if count == 0:
+             print('empty', file=sys.stderr)
+             sys.exit(1)
+
+         accounts = [
+             {'url': urls[i], 'name': names[i], 'email': emails[i]}
+             for i in range(count)
+         ]
+
+         groups = []
+         for i in range(0, len(accounts), group_size):
+             groups.append({'accounts': accounts[i:i + group_size]})
+
+         print(f'total={count} groups={len(groups)}')
+
+         with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+             f.write(f'matrix={json.dumps({"group": groups})}\n')
+         PYEOF
+
+ run:
+   needs: prepare
+   strategy:
+     matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+     max-parallel: 20
+     fail-fast: false
+   runs-on: ubuntu-latest
+
+   steps:
+     - name: setup
+       env:
+         SCRIPT: ${{ secrets.SCRIPT }}
+       run: |
+         echo "$SCRIPT" > worker.js
+
+     - name: install
+       run: |
+         npm install playwright
+         npx playwright install chromium --with-deps
+
+     - name: exec
+       env:
+         BASE_URL:   ${{ secrets.BASE_URL }}
+         PASS:       ${{ secrets.COMMON_PASS }}
+         GROUP_JSON: ${{ toJson(matrix.group.accounts) }}
+       run: |
+         python3 << 'PYEOF'
+         import json, os, subprocess, sys, time
+
+         accounts = json.loads(os.environ['GROUP_JSON'])
+         wait_sec = 3
+
+         results = []
+         for i, acct in enumerate(accounts):
+             print(f'[{i+1}/{len(accounts)}] {acct["name"]}')
+             sys.stdout.flush()
+
+             env = {
+                 **os.environ,
+                 'ENTRY_URL': acct['url'],
+                 'HANDLE':    acct['name'],
+                 'MAIL':      acct['email'],
+             }
+
+             ret    = subprocess.run(['node', 'worker.js'], env=env)
+             status = 'ok' if ret.returncode == 0 else 'fail'
+             results.append({'name': acct['name'], 'status': status})
+
+             if i < len(accounts) - 1:
+                 time.sleep(wait_sec)
+
+         print('\n-- summary --')
+         for r in results:
+             print(f'{"✅" if r["status"] == "ok" else "❌"} {r["name"]}')
+
+         if any(r['status'] == 'fail' for r in results):
+             sys.exit(1)
+         PYEOF
