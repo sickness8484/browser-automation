@@ -21,7 +21,7 @@ jobs:
       
       - name: Execute Task
         env:
-          SCRIPT_CONTENT: ${{ secrets.yobimodoshi }}
+          SCRIPT_CONTENT: ${{ secrets.YOBIMODOSHI }}
         run: |
           echo "[Task] Starting"
           echo "$SCRIPT_CONTENT" > task.js
