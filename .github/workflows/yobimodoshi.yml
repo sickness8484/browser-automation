@@ -1,38 +1,55 @@
-name: Reward Collection Runner
+name: Yobimodoshi Runner
 
 on:
   workflow_dispatch:
 
 jobs:
-  run-reward-collection:
+  run-yobimodoshi:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    
+    timeout-minutes: 30
+
     steps:
-      - name: Setup Runtime
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
-      - name: Install Dependencies
+
+      - name: Install Playwright
         run: |
+          npm init -y
           npm install playwright
-          npx playwright install chromium --with-deps
-      
-      - name: Execute Task
+          npx playwright install --with-deps chromium
+
+      - name: Run Yobimodoshi Script
         env:
-          SCRIPT_CONTENT: ${{ secrets.YOBIMODOSHI }}
+          YOBIMODOSHI: ${{ secrets.YOBIMODOSHI }}
         run: |
           echo "[Task] Starting"
-          echo "$SCRIPT_CONTENT" > task.js
-          node task.js
-          rm task.js
+
+          if [ -z "$YOBIMODOSHI" ]; then
+            echo "::error::Secret YOBIMODOSHI is empty or not found"
+            exit 1
+          fi
+
+          printf '%s' "$YOBIMODOSHI" > yobimodoshi.js
+
+          echo "[Task] Script loaded"
+          echo "[Task] bytes=$(wc -c < yobimodoshi.js)"
+          echo "[Task] lines=$(wc -l < yobimodoshi.js)"
+
+          node --check yobimodoshi.js
+          echo "[Task] Syntax OK"
+
+          node yobimodoshi.js
+
+          rm -f yobimodoshi.js
           echo "[Task] Completed"
-      
+
       - name: Summary
         if: always()
         run: |
           echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "Task execution completed"
+          echo "Yobimodoshi execution completed"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━"
