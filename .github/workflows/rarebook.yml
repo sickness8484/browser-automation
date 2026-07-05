@@ -1,0 +1,53 @@
+name: Rare Book Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-rarebook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Setup Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Execute RareBook Task
+        env:
+          RAREBOOK_JS: ${{ secrets.RAREBOOK_JS }}
+        run: |
+          echo "[Task] Starting RareBook"
+
+          if [ -z "$RAREBOOK_JS" ]; then
+            echo "::error::Secret RAREBOOK_JS is empty or not found"
+            exit 1
+          fi
+
+          printf '%s' "$RAREBOOK_JS" > rarebook.js
+
+          echo "[Task] Script loaded"
+          echo "[Task] bytes=$(wc -c < rarebook.js)"
+          echo "[Task] lines=$(wc -l < rarebook.js)"
+
+          node --check rarebook.js
+          echo "[Task] Syntax OK"
+
+          node rarebook.js
+
+          rm -f rarebook.js
+          echo "[Task] Completed"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "RareBook task execution completed"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━"
