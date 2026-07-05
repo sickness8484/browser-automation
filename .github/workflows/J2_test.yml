@@ -1,48 +1,26 @@
-name: Automation
+name: Daily Test
+
 on:
   workflow_dispatch:
+
 jobs:
-  run-scripts:
+  run-script:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
+    timeout-minutes: 20
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install Playwright
+
+      - run: npm init -y && npm install playwright
+
+      - run: npx playwright install --with-deps
+
+      - env:
+          J2_RAID_JS: ${{ secrets.J2_RAID_JS }}
         run: |
-          npm install -D playwright
-          npx playwright install chromium
-      - name: Run automation scripts
-        env:
-          J2_TEST_JS: ${{ secrets.J2_TEST_JS }}
-          J2_KYUEN_JS: ${{ secrets.J2_KYUEN_JS }}
-        run: |
-          echo "$J2_TEST_JS" > j2_test.js
-          echo "$J2_KYUEN_JS" > j2_kyuen.js
-          
-          # ── 事前実行 ─────────────────────────
-          echo "Running J2_TEST_JS..."
-          node j2_test.js
-          
-          # ── 繰り返し実行: 10回 ─────────────────────────
-          for i in {1..10}; do
-            echo "=== Repeat $i/10 ==="
-            
-            WAIT_TIME=$((60 + RANDOM % 60))
-            echo "Waiting ${WAIT_TIME} seconds..."
-            sleep $WAIT_TIME
-            
-            echo "Running J2_KYUEN_JS ($i/10)..."
-            node j2_kyuen.js
-          done
-          
-          echo "All done!"
-      - name: Cleanup
-        if: always()
-        run: |
-          rm -f j2_test.js j2_kyuen.js
+          printf '%s\n' "$J2_RAID_JS" > j2_raid.js
+          node j2_raid.js
