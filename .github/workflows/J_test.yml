@@ -1,4 +1,4 @@
-name: J1_raid
+name: Daily Test
 
 on:
   workflow_dispatch:
@@ -22,5 +22,5 @@ jobs:
       - env:
           J1_RAID_JS: ${{ secrets.J1_RAID_JS }}
         run: |
-          echo "$J1_RAID_JS" > J1_raid_js.js
-          node J1_raid_js.js
+          printf '%s\n' "$J1_RAID_JS" > j1_raid.js
+          node j1_raid.js
