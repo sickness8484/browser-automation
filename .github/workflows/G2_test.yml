@@ -1,59 +1,26 @@
-name: Automation
+name: Daily Test
+
 on:
   workflow_dispatch:
+
 jobs:
-  run-scripts:
+  run-script:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install Playwright
+
+      - run: npm init -y && npm install playwright
+
+      - run: npx playwright install --with-deps
+
+      - env:
+          G2_RAID_JS: ${{ secrets.G2_RAID_JS }}
         run: |
-          npm install -D playwright
-          npx playwright install --with-deps chromium
-      - name: Run automation scripts
-        env:
-          G2_TEST_JS: ${{ secrets.G2_TEST_JS }}
-          G2_KYUEN_JS: ${{ secrets.G2_KYUEN_JS }}
-        run: |
-          set +e
-          run_node_safe() {
-            local label="$1"
-            local file="$2"
-            echo "Running ${label}..."
-            node "$file"
-            local code=$?
-            if [ "$code" -ne 0 ]; then
-              echo "::warning title=${label} failed::exit code ${code}"
-            fi
-            return 0
-          }
-          
-          printf '%s\n' "$G2_TEST_JS" > g2_test.js
-          printf '%s\n' "$G2_KYUEN_JS" > g2_kyuen.js
-          
-          # ── 事前実行 ─────────────────────────
-          run_node_safe G2_TEST_JS g2_test.js
-          
-          # ── 繰り返し実行: 7回 ─────────────────────────
-          for i in {1..7}; do
-            echo "=== Repeat $i/7 ==="
-            
-            WAIT_TIME=$((90 + RANDOM % 30))
-            echo "Waiting ${WAIT_TIME} seconds..."
-            sleep $WAIT_TIME
-            
-            run_node_safe G2_KYUEN_JS g2_kyuen.js
-          done
-          
-          echo "All done!"
-      - name: Cleanup
-        if: always()
-        run: |
-          rm -f g2_test.js g2_kyuen.js
+          printf '%s\n' "$G2_RAID_JS" > g2_raid.js
+          node g2_raid.js
