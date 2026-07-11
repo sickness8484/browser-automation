@@ -1,0 +1,133 @@
+name: J1 Raid Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      concurrency:
+        description: "同時実行アカウント数"
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "2"
+
+permissions:
+  contents: read
+
+# 同じワークフローが重複起動しても、先に動いている処理を中断しない
+concurrency:
+  group: j1-raid-runner
+  cancel-in-progress: false
+
+jobs:
+  run-j1-raid:
+    name: Run J1 Raid Script
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      CI: "true"
+
+      # 初回は1を推奨。安定確認後、手動実行画面から2を選択
+      CONCURRENCY: ${{ inputs.concurrency }}
+
+      MAX_QUEST_ADVANCES: "15"
+      MAX_QUEST_ITERATIONS: "40"
+      MAX_RESCUE_HITS: "30"
+
+      QUEST_HTTP_ENABLED: "1"
+      QUEST_HTTP_FALLBACK_TO_BROWSER: "1"
+      RAID_HTTP_ENABLED: "1"
+      RAID_HTTP_FALLBACK_TO_BROWSER: "1"
+
+      QUEST_HTTP_TIMEOUT_MS: "15000"
+      RAID_HTTP_TIMEOUT_MS: "15000"
+
+      STRICT_EXIT: "0"
+      DRY_RUN: "0"
+      LOG_LEVEL: "info"
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Restore script from J1_RAID_JS
+        shell: bash
+        env:
+          J1_RAID_JS: ${{ secrets.J1_RAID_JS }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          WORK_DIR="$RUNNER_TEMP/j1-raid-runner"
+          SCRIPT_FILE="$WORK_DIR/j1_raid.cjs"
+
+          rm -rf "$WORK_DIR"
+          mkdir -p "$WORK_DIR"
+          chmod 700 "$WORK_DIR"
+
+          if [[ -z "${J1_RAID_JS:-}" ]]; then
+            echo "::error::Secret J1_RAID_JS が空、未登録、または参照できません。"
+            exit 1
+          fi
+
+          # echoは使わず、改行や特殊文字を保持したまま復元する
+          printf '%s' "$J1_RAID_JS" > "$SCRIPT_FILE"
+          chmod 600 "$SCRIPT_FILE"
+
+          # 後続プロセスへSecret本体を環境変数として残さない
+          unset J1_RAID_JS
+
+          echo "J1_WORK_DIR=$WORK_DIR" >> "$GITHUB_ENV"
+          echo "J1_SCRIPT_FILE=$SCRIPT_FILE" >> "$GITHUB_ENV"
+
+          echo "Script restored successfully."
+          echo "Script contents are not printed."
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$J1_WORK_DIR"
+
+          npm init -y >/dev/null 2>&1
+
+          npm install \
+            --no-save \
+            --no-audit \
+            --no-fund \
+            playwright@1.61.0
+
+          npx playwright install --with-deps chromium
+
+      - name: Validate script
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s "$J1_SCRIPT_FILE"
+          node --check "$J1_SCRIPT_FILE"
+
+          echo "JavaScript syntax check passed."
+
+      - name: Run J1 Raid
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node "$J1_SCRIPT_FILE"
+
+      - name: Cleanup restored secret
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${J1_WORK_DIR:-}" ]]; then
+            rm -rf "$J1_WORK_DIR"
+          fi
+
+          echo "Temporary script removed."
