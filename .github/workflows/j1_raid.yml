@@ -14,37 +14,53 @@ jobs:
   raid-economy:
     runs-on: ubuntu-latest
 
-    # セットアップ時間を含め、ジョブ全体を30分で終了
+    # セットアップ、実行、ログ保存を含むジョブ全体の上限
     timeout-minutes: 30
 
     env:
       NODE_ENV: production
 
-      # 複数アカウントの同時実行数
+      # 同時実行アカウント数
       CONCURRENCY: "5"
 
-      # スクリプト側が対応している場合に使用
+      # レイド処理設定
       CYCLES: "12"
       MIN_WAIT_SECONDS: "60"
       MAX_WAIT_SECONDS: "120"
 
-      # 自発用に残すBP
+      # 自発用に確保するBP
       SELF_RESERVE_BP: "60"
 
-      # ログファイルの保存先
+      # 計測ログ
       RAID_MEASURE_FILE: "${{ github.workspace }}/raid_measurements.jsonl"
+
+      # Node 20への一時退避は使用しない
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/checkout@v7
         with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: |
-            package-lock.json
+          persist-credentials: false
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+          # package-lock.jsonがない環境でも失敗しないように無効化
+          package-manager-cache: false
+
+      - name: Show runtime versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Node version:"
+          node --version
+
+          echo "npm version:"
+          npm --version
 
       - name: Install dependencies
         shell: bash
@@ -52,15 +68,20 @@ jobs:
           set -euo pipefail
 
           if [ -f package-lock.json ]; then
+            echo "package-lock.json found: running npm ci"
             npm ci
           elif [ -f package.json ]; then
+            echo "package.json found without lockfile: running npm install"
             npm install
           else
+            echo "No package.json found: creating temporary npm project"
             npm init -y
           fi
 
-          # package.jsonにPlaywrightが入っていない場合にも対応
-          if ! node -e "require.resolve('playwright')" >/dev/null 2>&1; then
+          if node -e "require.resolve('playwright')" >/dev/null 2>&1; then
+            echo "Playwright is already installed."
+          else
+            echo "Installing Playwright..."
             npm install --no-save playwright
           fi
 
@@ -68,9 +89,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           npx playwright install --with-deps chromium
 
-      - name: Verify script
+      - name: Verify raid script
         shell: bash
         run: |
           set -euo pipefail
@@ -79,18 +101,35 @@ jobs:
 
           if [ ! -f "$SCRIPT_FILE" ]; then
             echo "::error::${SCRIPT_FILE} がリポジトリ直下にありません。"
-            echo "現在のファイル一覧:"
-            find . -maxdepth 2 -type f | sort
+            echo ""
+            echo "リポジトリ内のJavaScriptファイル:"
+            find . -maxdepth 3 -type f -name "*.js" -print | sort
             exit 1
           fi
 
-          echo "Script: $SCRIPT_FILE"
-          echo "Size: $(wc -c < "$SCRIPT_FILE") bytes"
+          FILE_SIZE="$(wc -c < "$SCRIPT_FILE")"
 
-          # JavaScriptの構文検査
+          echo "Script file : $SCRIPT_FILE"
+          echo "Script size : $FILE_SIZE bytes"
+
+          if [ "$FILE_SIZE" -lt 1000 ]; then
+            echo "::error::スクリプトのサイズが小さすぎます。貼り付けが途中で切れている可能性があります。"
+            exit 1
+          fi
+
           node --check "$SCRIPT_FILE"
 
           echo "JavaScript syntax check passed."
+
+      - name: Initialize measurement file
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : > "${GITHUB_WORKSPACE}/raid_measurements.jsonl"
+
+          echo "Measurement file initialized:"
+          echo "${GITHUB_WORKSPACE}/raid_measurements.jsonl"
 
       - name: Run raid economy
         shell: bash
@@ -101,22 +140,28 @@ jobs:
 
           echo "========================================"
           echo "DragonCraze Raid Economy"
+          echo "Node        : $(node --version)"
           echo "Concurrency : ${CONCURRENCY}"
+          echo "Cycles      : ${CYCLES}"
           echo "Job timeout : 30 minutes"
-          echo "Script limit: 27 minutes"
+          echo "Script limit: 25 minutes"
           echo "Started at  : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           echo "========================================"
 
-          # ジョブ全体の30分制限より先に止め、
-          # 計測ファイルのアップロード時間を残す
           set +e
+
+          # ジョブ全体30分より先に終了させ、
+          # ログ出力とArtifact保存の時間を確保する
           timeout \
             --signal=TERM \
             --kill-after=20s \
-            27m \
-            node --unhandled-rejections=strict "$SCRIPT_FILE"
+            25m \
+            node \
+              --unhandled-rejections=strict \
+              "$SCRIPT_FILE"
 
           EXIT_CODE=$?
+
           set -e
 
           echo "========================================"
@@ -124,20 +169,31 @@ jobs:
           echo "Exit code   : ${EXIT_CODE}"
           echo "========================================"
 
-          if [ "$EXIT_CODE" -eq 124 ]; then
-            echo "::notice::27分の内部実行制限に到達したため、正常に停止しました。"
-            exit 0
-          fi
+          case "$EXIT_CODE" in
+            0)
+              echo "Raid script completed successfully."
+              ;;
 
-          if [ "$EXIT_CODE" -eq 137 ]; then
-            echo "::error::スクリプトが強制終了されました。メモリ不足または停止処理失敗の可能性があります。"
-            exit 137
-          fi
+            124)
+              echo "::notice::25分の内部制限に到達したため、スクリプトを終了しました。"
+              exit 0
+              ;;
 
-          if [ "$EXIT_CODE" -ne 0 ]; then
-            echo "::error::レイドスクリプトがエラー終了しました。終了コード: ${EXIT_CODE}"
-            exit "$EXIT_CODE"
-          fi
+            137)
+              echo "::error::スクリプトが強制終了されました。メモリ不足または終了処理失敗の可能性があります。"
+              exit 137
+              ;;
+
+            143)
+              echo "::notice::タイムアウトのTERMシグナルにより終了しました。"
+              exit 0
+              ;;
+
+            *)
+              echo "::error::レイドスクリプトがエラー終了しました。終了コード: ${EXIT_CODE}"
+              exit "$EXIT_CODE"
+              ;;
+          esac
 
       - name: Show measurement summary
         if: always()
@@ -147,25 +203,37 @@ jobs:
 
           FILE="${GITHUB_WORKSPACE}/raid_measurements.jsonl"
 
+          echo "========================================"
+          echo "Measurement summary"
+          echo "========================================"
+
           if [ ! -f "$FILE" ]; then
-            echo "raid_measurements.jsonl は生成されませんでした。"
+            echo "raid_measurements.jsonl は存在しません。"
             exit 0
           fi
 
-          echo "Measurement file:"
-          echo "  Path : $FILE"
-          echo "  Size : $(wc -c < "$FILE") bytes"
-          echo "  Lines: $(wc -l < "$FILE")"
+          FILE_SIZE="$(wc -c < "$FILE")"
+          LINE_COUNT="$(wc -l < "$FILE")"
 
-          echo ""
-          echo "Last 20 measurement records:"
-          tail -n 20 "$FILE" || true
+          echo "Path : $FILE"
+          echo "Size : $FILE_SIZE bytes"
+          echo "Lines: $LINE_COUNT"
+
+          if [ "$LINE_COUNT" -gt 0 ]; then
+            echo ""
+            echo "Last 30 records:"
+            tail -n 30 "$FILE" || true
+          else
+            echo ""
+            echo "計測レコードはまだ書き込まれていません。"
+          fi
 
       - name: Upload raid measurements
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: raid-measurements-${{ github.run_id }}
           path: raid_measurements.jsonl
           if-no-files-found: warn
           retention-days: 14
+          compression-level: 6
