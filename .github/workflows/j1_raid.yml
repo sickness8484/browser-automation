@@ -6,6 +6,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: j1-routine
+  cancel-in-progress: false
+
 jobs:
   main:
     name: Main
@@ -14,27 +18,35 @@ jobs:
 
     env:
       CI: "true"
+
+      CONCURRENCY: "5"
+
       MAX_QUEST_ADVANCES: "15"
       MAX_QUEST_ITERATIONS: "40"
       MAX_RESCUE_HITS: "30"
       MAX_SAME_QUEST_STATE: "2"
+
       QUEST_HTTP_ENABLED: "1"
       QUEST_HTTP_FALLBACK_TO_BROWSER: "1"
       RAID_HTTP_ENABLED: "1"
       RAID_HTTP_FALLBACK_TO_BROWSER: "1"
+
       QUEST_HTTP_TIMEOUT_MS: "15000"
       RAID_HTTP_TIMEOUT_MS: "15000"
+
       STRICT_EXIT: "0"
       DRY_RUN: "0"
       LOG_LEVEL: "info"
 
     steps:
-      - name: Clock
+      - name: Init
         shell: bash
         run: |
           set -euo pipefail
 
           START_TS="$(date +%s)"
+
+          # 30分の強制終了より約1分早く内部処理を終了
           SAFE_END_TS="$((START_TS + 1740))"
 
           echo "START_TS=$START_TS" >> "$GITHUB_ENV"
@@ -68,6 +80,11 @@ jobs:
           printf '%s' "$J1_DATA" > "$TASK_FILE"
           chmod 600 "$TASK_FILE"
 
+          if [[ ! -s "$TASK_FILE" ]]; then
+            echo "::error::Restored data is empty."
+            exit 1
+          fi
+
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
           echo "TASK_FILE=$TASK_FILE" >> "$GITHUB_ENV"
 
@@ -79,41 +96,107 @@ jobs:
           set -euo pipefail
 
           node <<'NODE'
+          'use strict';
+
           const fs = require('node:fs');
 
           const file = process.env.TASK_FILE;
+
+          if (!file) {
+            throw new Error('TASK_FILE is not defined.');
+          }
+
           let code = fs.readFileSync(file, 'utf8');
 
-          const before = 'n("CONCURRENCY",2,{min:1,max:4})';
-          const after  = 'n("CONCURRENCY",5,{min:1,max:5})';
+          const replacements = [
+            [
+              'n("CONCURRENCY",2,{min:1,max:4})',
+              'n("CONCURRENCY",5,{min:1,max:5})'
+            ],
+            [
+              'n("CONCURRENCY",5,{min:1,max:4})',
+              'n("CONCURRENCY",5,{min:1,max:5})'
+            ],
+            [
+              'headless:1',
+              'headless:true'
+            ],
+            [
+              'javaScriptEnabled:1',
+              'javaScriptEnabled:true'
+            ],
+            [
+              'failOnStatusCode:0',
+              'failOnStatusCode:false'
+            ],
+            [
+              'noWaitAfter:1',
+              'noWaitAfter:true'
+            ],
+            [
+              'process.env.K',
+              'process.env.LOG_LEVEL'
+            ]
+          ];
 
-          if (code.includes(before)) {
-            code = code.replace(before, after);
-          } else {
-            const launchers = [
-              'eval(SOURCE);',
-              "Function('require', 'process', 'Buffer', SOURCE)(require, process, Buffer);",
-              'Function("require","process","Buffer",SOURCE)(require,process,Buffer);'
-            ];
+          function patchSource(source) {
+            let result = source;
 
-            const launcher = launchers.find(value => code.includes(value));
-
-            if (!launcher || !code.includes('SOURCE')) {
-              throw new Error('Runtime marker was not found.');
+            for (const [from, to] of replacements) {
+              result = result.replaceAll(from, to);
             }
 
-            code = code.replace('const SOURCE =', 'let SOURCE =');
+            return result;
+          }
 
-            const injection =
-              `SOURCE = SOURCE.replace(${JSON.stringify(before)}, ${JSON.stringify(after)});\n`;
+          /*
+           * 圧縮ラッパー版の場合、Brotli展開後・実行直前に
+           * PATCHED_SOURCEへ修正を加える。
+           *
+           * これにより先頭に入力した認証URLはそのまま維持される。
+           */
+          const launchers = [
+            'eval(SOURCE);',
+            "Function('require', 'process', 'Buffer', SOURCE)(require, process, Buffer);",
+            'Function("require","process","Buffer",SOURCE)(require,process,Buffer);'
+          ];
 
-            code = code.replace(launcher, injection + launcher);
+          const launcher = launchers.find(value => code.includes(value));
+
+          if (launcher && code.includes('SOURCE')) {
+            const runtimeLauncher = launcher.replace(
+              /\bSOURCE\b/g,
+              'PATCHED_SOURCE'
+            );
+
+            const chain = replacements
+              .map(
+                ([from, to]) =>
+                  `  .replaceAll(${JSON.stringify(from)}, ${JSON.stringify(to)})`
+              )
+              .join('\n');
+
+            const patchBlock = [
+              'const PATCHED_SOURCE = SOURCE',
+              `${chain};`,
+              '',
+              runtimeLauncher
+            ].join('\n');
+
+            code = code.replace(launcher, patchBlock);
+          } else {
+            /*
+             * 圧縮ラッパーではなく通常のJSが登録されている場合。
+             */
+            code = patchSource(code);
           }
 
           fs.writeFileSync(file, code, {
             encoding: 'utf8',
             mode: 0o600
           });
+
+          console.log('Preparation completed.');
           NODE
 
           cd "$TASK_DIR"
@@ -124,7 +207,7 @@ jobs:
             --no-save \
             --no-audit \
             --no-fund \
-            playwright
+            playwright@1.61.0
 
           npx playwright install --with-deps chromium
 
@@ -134,7 +217,139 @@ jobs:
           set -euo pipefail
 
           test -s "$TASK_FILE"
+
+          # 外側のJSを検査
           node --check "$TASK_FILE"
+
+          # 圧縮本体も展開して、修正後の構文を検査
+          node <<'NODE'
+          'use strict';
+
+          const fs = require('node:fs');
+          const vm = require('node:vm');
+          const zlib = require('node:zlib');
+
+          const file = process.env.TASK_FILE;
+          const code = fs.readFileSync(file, 'utf8');
+
+          const replacements = [
+            [
+              'n("CONCURRENCY",2,{min:1,max:4})',
+              'n("CONCURRENCY",5,{min:1,max:5})'
+            ],
+            [
+              'n("CONCURRENCY",5,{min:1,max:4})',
+              'n("CONCURRENCY",5,{min:1,max:5})'
+            ],
+            [
+              'headless:1',
+              'headless:true'
+            ],
+            [
+              'javaScriptEnabled:1',
+              'javaScriptEnabled:true'
+            ],
+            [
+              'failOnStatusCode:0',
+              'failOnStatusCode:false'
+            ],
+            [
+              'noWaitAfter:1',
+              'noWaitAfter:true'
+            ],
+            [
+              'process.env.K',
+              'process.env.LOG_LEVEL'
+            ]
+          ];
+
+          function patchSource(source) {
+            let result = source;
+
+            for (const [from, to] of replacements) {
+              result = result.replaceAll(from, to);
+            }
+
+            return result;
+          }
+
+          const payloadMatch = code.match(
+            /const\s+PAYLOAD\s*=\s*\[([\s\S]*?)\]\.join\(\s*(['"])\2\s*\)\s*;/
+          );
+
+          let source;
+
+          if (payloadMatch) {
+            const chunks = vm.runInNewContext(
+              `[${payloadMatch[1]}]`,
+              Object.create(null),
+              {
+                timeout: 1000
+              }
+            );
+
+            if (
+              !Array.isArray(chunks) ||
+              !chunks.every(value => typeof value === 'string')
+            ) {
+              throw new Error('Invalid payload format.');
+            }
+
+            const payload = chunks.join('');
+
+            source = zlib
+              .brotliDecompressSync(
+                Buffer.from(payload, 'base64')
+              )
+              .toString('utf8');
+          } else {
+            source = code;
+          }
+
+          const patched = patchSource(source);
+
+          const invalidPatterns = [
+            'headless:1',
+            'javaScriptEnabled:1',
+            'failOnStatusCode:0',
+            'noWaitAfter:1'
+          ];
+
+          const leftovers = invalidPatterns.filter(pattern =>
+            patched.includes(pattern)
+          );
+
+          if (leftovers.length > 0) {
+            throw new Error(
+              `Invalid options remain: ${leftovers.join(', ')}`
+            );
+          }
+
+          if (
+            patched.includes('n("CONCURRENCY",2,{min:1,max:4})') ||
+            patched.includes('n("CONCURRENCY",5,{min:1,max:4})')
+          ) {
+            throw new Error('Runtime limit was not updated.');
+          }
+
+          if (!patched.includes('headless:true')) {
+            throw new Error('headless:true was not found.');
+          }
+
+          if (
+            !patched.includes(
+              'n("CONCURRENCY",5,{min:1,max:5})'
+            )
+          ) {
+            throw new Error('Expected runtime marker was not found.');
+          }
+
+          new vm.Script(patched, {
+            filename: 'payload.cjs'
+          });
+
+          console.log('Validation completed.');
+          NODE
 
       - name: Cycle
         shell: bash
@@ -143,29 +358,43 @@ jobs:
 
           COUNT=0
           LONGEST=0
+
+          # 初回だけ使用する見積もり
           FIRST_ESTIMATE=240
-          END_MARGIN=20
+
+          # 各実行が終了する前に確保する余裕
+          END_MARGIN=30
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Started"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
           while true; do
             NOW="$(date +%s)"
             REMAINING="$((SAFE_END_TS - NOW))"
 
             if (( LONGEST > 0 )); then
-              ESTIMATE="$(((LONGEST * 3 + 1) / 2 + 30))"
+              # 過去最長時間 + 45秒を次回見積もりに使用
+              ESTIMATE="$((LONGEST + 45))"
 
-              if (( ESTIMATE < 180 )); then
-                ESTIMATE=180
+              # 最低2分は確保
+              if (( ESTIMATE < 120 )); then
+                ESTIMATE=120
               fi
             else
               ESTIMATE="$FIRST_ESTIMATE"
             fi
 
+            # 次の1回が安全に収まらない場合は開始しない
             if (( REMAINING <= ESTIMATE + END_MARGIN )); then
               break
             fi
 
             COUNT="$((COUNT + 1))"
             RUN_START="$(date +%s)"
+
+            # 現在の残り時間を超えて動き続けないための絶対上限
             RUN_LIMIT="$((REMAINING - END_MARGIN))"
 
             echo ""
@@ -195,6 +424,7 @@ jobs:
               LONGEST="$RUN_SECONDS"
             fi
 
+            echo ""
             echo "Cycle #$COUNT finished in ${RUN_SECONDS}s"
             echo "Status: $STATUS"
 
@@ -208,24 +438,27 @@ jobs:
               exit "$STATUS"
             fi
 
+            # 次回まで60～120秒のランダム待機
             WAIT_SECONDS="$(shuf -i 60-120 -n 1)"
 
             NOW="$(date +%s)"
             REMAINING="$((SAFE_END_TS - NOW))"
 
-            ESTIMATE="$(((LONGEST * 3 + 1) / 2 + 30))"
+            ESTIMATE="$((LONGEST + 45))"
 
-            if (( ESTIMATE < 180 )); then
-              ESTIMATE=180
+            if (( ESTIMATE < 120 )); then
+              ESTIMATE=120
             fi
 
             REQUIRED="$((WAIT_SECONDS + ESTIMATE + END_MARGIN))"
 
+            # 待機時間と次回処理時間の両方が収まらなければ終了
             if (( REMAINING <= REQUIRED )); then
               break
             fi
 
             echo "Pause: ${WAIT_SECONDS}s"
+
             sleep "$WAIT_SECONDS"
           done
 
@@ -256,3 +489,5 @@ jobs:
           if [[ -n "${TASK_DIR:-}" ]]; then
             rm -rf "$TASK_DIR"
           fi
+
+          echo "Finished."
