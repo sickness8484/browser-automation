@@ -1,4 +1,4 @@
-name: J1 Routine
+name: DragonCraze Raid Economy
 
 on:
   workflow_dispatch:
@@ -7,487 +7,165 @@ permissions:
   contents: read
 
 concurrency:
-  group: j1-routine
+  group: dragoncraze-raid-economy
   cancel-in-progress: false
 
 jobs:
-  main:
-    name: Main
+  raid-economy:
     runs-on: ubuntu-latest
+
+    # セットアップ時間を含め、ジョブ全体を30分で終了
     timeout-minutes: 30
 
     env:
-      CI: "true"
+      NODE_ENV: production
 
+      # 複数アカウントの同時実行数
       CONCURRENCY: "5"
 
-      MAX_QUEST_ADVANCES: "15"
-      MAX_QUEST_ITERATIONS: "40"
-      MAX_RESCUE_HITS: "30"
-      MAX_SAME_QUEST_STATE: "2"
+      # スクリプト側が対応している場合に使用
+      CYCLES: "12"
+      MIN_WAIT_SECONDS: "60"
+      MAX_WAIT_SECONDS: "120"
 
-      QUEST_HTTP_ENABLED: "1"
-      QUEST_HTTP_FALLBACK_TO_BROWSER: "1"
-      RAID_HTTP_ENABLED: "1"
-      RAID_HTTP_FALLBACK_TO_BROWSER: "1"
+      # 自発用に残すBP
+      SELF_RESERVE_BP: "60"
 
-      QUEST_HTTP_TIMEOUT_MS: "15000"
-      RAID_HTTP_TIMEOUT_MS: "15000"
-
-      STRICT_EXIT: "0"
-      DRY_RUN: "0"
-      LOG_LEVEL: "info"
+      # ログファイルの保存先
+      RAID_MEASURE_FILE: "${{ github.workspace }}/raid_measurements.jsonl"
 
     steps:
-      - name: Init
-        shell: bash
-        run: |
-          set -euo pipefail
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-          START_TS="$(date +%s)"
-
-          # 30分の強制終了より約1分早く内部処理を終了
-          SAFE_END_TS="$((START_TS + 1740))"
-
-          echo "START_TS=$START_TS" >> "$GITHUB_ENV"
-          echo "SAFE_END_TS=$SAFE_END_TS" >> "$GITHUB_ENV"
-
-      - name: Runtime
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
 
-      - name: Load
-        shell: bash
-        env:
-          J1_DATA: ${{ secrets.J1_RAID_JS }}
-        run: |
-          set -euo pipefail
-          umask 077
-
-          TASK_DIR="$RUNNER_TEMP/j1"
-          TASK_FILE="$TASK_DIR/main.cjs"
-
-          rm -rf "$TASK_DIR"
-          mkdir -p "$TASK_DIR"
-          chmod 700 "$TASK_DIR"
-
-          if [[ -z "${J1_DATA:-}" ]]; then
-            echo "::error::Required data is empty."
-            exit 1
-          fi
-
-          printf '%s' "$J1_DATA" > "$TASK_FILE"
-          chmod 600 "$TASK_FILE"
-
-          if [[ ! -s "$TASK_FILE" ]]; then
-            echo "::error::Restored data is empty."
-            exit 1
-          fi
-
-          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
-          echo "TASK_FILE=$TASK_FILE" >> "$GITHUB_ENV"
-
-          unset J1_DATA
-
-      - name: Prepare
+      - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
 
-          node <<'NODE'
-          'use strict';
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          else
+            npm init -y
+          fi
 
-          const fs = require('node:fs');
+          # package.jsonにPlaywrightが入っていない場合にも対応
+          if ! node -e "require.resolve('playwright')" >/dev/null 2>&1; then
+            npm install --no-save playwright
+          fi
 
-          const file = process.env.TASK_FILE;
-
-          if (!file) {
-            throw new Error('TASK_FILE is not defined.');
-          }
-
-          let code = fs.readFileSync(file, 'utf8');
-
-          const replacements = [
-            [
-              'n("CONCURRENCY",2,{min:1,max:4})',
-              'n("CONCURRENCY",5,{min:1,max:5})'
-            ],
-            [
-              'n("CONCURRENCY",5,{min:1,max:4})',
-              'n("CONCURRENCY",5,{min:1,max:5})'
-            ],
-            [
-              'headless:1',
-              'headless:true'
-            ],
-            [
-              'javaScriptEnabled:1',
-              'javaScriptEnabled:true'
-            ],
-            [
-              'failOnStatusCode:0',
-              'failOnStatusCode:false'
-            ],
-            [
-              'noWaitAfter:1',
-              'noWaitAfter:true'
-            ],
-            [
-              'process.env.K',
-              'process.env.LOG_LEVEL'
-            ]
-          ];
-
-          function patchSource(source) {
-            let result = source;
-
-            for (const [from, to] of replacements) {
-              result = result.replaceAll(from, to);
-            }
-
-            return result;
-          }
-
-          /*
-           * 圧縮ラッパー版の場合、Brotli展開後・実行直前に
-           * PATCHED_SOURCEへ修正を加える。
-           *
-           * これにより先頭に入力した認証URLはそのまま維持される。
-           */
-          const launchers = [
-            'eval(SOURCE);',
-            "Function('require', 'process', 'Buffer', SOURCE)(require, process, Buffer);",
-            'Function("require","process","Buffer",SOURCE)(require,process,Buffer);'
-          ];
-
-          const launcher = launchers.find(value => code.includes(value));
-
-          if (launcher && code.includes('SOURCE')) {
-            const runtimeLauncher = launcher.replace(
-              /\bSOURCE\b/g,
-              'PATCHED_SOURCE'
-            );
-
-            const chain = replacements
-              .map(
-                ([from, to]) =>
-                  `  .replaceAll(${JSON.stringify(from)}, ${JSON.stringify(to)})`
-              )
-              .join('\n');
-
-            const patchBlock = [
-              'const PATCHED_SOURCE = SOURCE',
-              `${chain};`,
-              '',
-              runtimeLauncher
-            ].join('\n');
-
-            code = code.replace(launcher, patchBlock);
-          } else {
-            /*
-             * 圧縮ラッパーではなく通常のJSが登録されている場合。
-             */
-            code = patchSource(code);
-          }
-
-          fs.writeFileSync(file, code, {
-            encoding: 'utf8',
-            mode: 0o600
-          });
-
-          console.log('Preparation completed.');
-          NODE
-
-          cd "$TASK_DIR"
-
-          npm init -y >/dev/null 2>&1
-
-          npm install \
-            --no-save \
-            --no-audit \
-            --no-fund \
-            playwright@1.61.0
-
+      - name: Install Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
           npx playwright install --with-deps chromium
 
-      - name: Check
+      - name: Verify script
         shell: bash
         run: |
           set -euo pipefail
 
-          test -s "$TASK_FILE"
+          SCRIPT_FILE="dragoncraze_raid_economy_v4.js"
 
-          # 外側のJSを検査
-          node --check "$TASK_FILE"
+          if [ ! -f "$SCRIPT_FILE" ]; then
+            echo "::error::${SCRIPT_FILE} がリポジトリ直下にありません。"
+            echo "現在のファイル一覧:"
+            find . -maxdepth 2 -type f | sort
+            exit 1
+          fi
 
-          # 圧縮本体も展開して、修正後の構文を検査
-          node <<'NODE'
-          'use strict';
+          echo "Script: $SCRIPT_FILE"
+          echo "Size: $(wc -c < "$SCRIPT_FILE") bytes"
 
-          const fs = require('node:fs');
-          const vm = require('node:vm');
-          const zlib = require('node:zlib');
+          # JavaScriptの構文検査
+          node --check "$SCRIPT_FILE"
 
-          const file = process.env.TASK_FILE;
-          const code = fs.readFileSync(file, 'utf8');
+          echo "JavaScript syntax check passed."
 
-          const replacements = [
-            [
-              'n("CONCURRENCY",2,{min:1,max:4})',
-              'n("CONCURRENCY",5,{min:1,max:5})'
-            ],
-            [
-              'n("CONCURRENCY",5,{min:1,max:4})',
-              'n("CONCURRENCY",5,{min:1,max:5})'
-            ],
-            [
-              'headless:1',
-              'headless:true'
-            ],
-            [
-              'javaScriptEnabled:1',
-              'javaScriptEnabled:true'
-            ],
-            [
-              'failOnStatusCode:0',
-              'failOnStatusCode:false'
-            ],
-            [
-              'noWaitAfter:1',
-              'noWaitAfter:true'
-            ],
-            [
-              'process.env.K',
-              'process.env.LOG_LEVEL'
-            ]
-          ];
-
-          function patchSource(source) {
-            let result = source;
-
-            for (const [from, to] of replacements) {
-              result = result.replaceAll(from, to);
-            }
-
-            return result;
-          }
-
-          const payloadMatch = code.match(
-            /const\s+PAYLOAD\s*=\s*\[([\s\S]*?)\]\.join\(\s*(['"])\2\s*\)\s*;/
-          );
-
-          let source;
-
-          if (payloadMatch) {
-            const chunks = vm.runInNewContext(
-              `[${payloadMatch[1]}]`,
-              Object.create(null),
-              {
-                timeout: 1000
-              }
-            );
-
-            if (
-              !Array.isArray(chunks) ||
-              !chunks.every(value => typeof value === 'string')
-            ) {
-              throw new Error('Invalid payload format.');
-            }
-
-            const payload = chunks.join('');
-
-            source = zlib
-              .brotliDecompressSync(
-                Buffer.from(payload, 'base64')
-              )
-              .toString('utf8');
-          } else {
-            source = code;
-          }
-
-          const patched = patchSource(source);
-
-          const invalidPatterns = [
-            'headless:1',
-            'javaScriptEnabled:1',
-            'failOnStatusCode:0',
-            'noWaitAfter:1'
-          ];
-
-          const leftovers = invalidPatterns.filter(pattern =>
-            patched.includes(pattern)
-          );
-
-          if (leftovers.length > 0) {
-            throw new Error(
-              `Invalid options remain: ${leftovers.join(', ')}`
-            );
-          }
-
-          if (
-            patched.includes('n("CONCURRENCY",2,{min:1,max:4})') ||
-            patched.includes('n("CONCURRENCY",5,{min:1,max:4})')
-          ) {
-            throw new Error('Runtime limit was not updated.');
-          }
-
-          if (!patched.includes('headless:true')) {
-            throw new Error('headless:true was not found.');
-          }
-
-          if (
-            !patched.includes(
-              'n("CONCURRENCY",5,{min:1,max:5})'
-            )
-          ) {
-            throw new Error('Expected runtime marker was not found.');
-          }
-
-          new vm.Script(patched, {
-            filename: 'payload.cjs'
-          });
-
-          console.log('Validation completed.');
-          NODE
-
-      - name: Cycle
+      - name: Run raid economy
         shell: bash
         run: |
           set -euo pipefail
 
-          COUNT=0
-          LONGEST=0
+          SCRIPT_FILE="dragoncraze_raid_economy_v4.js"
 
-          # 初回だけ使用する見積もり
-          FIRST_ESTIMATE=240
+          echo "========================================"
+          echo "DragonCraze Raid Economy"
+          echo "Concurrency : ${CONCURRENCY}"
+          echo "Job timeout : 30 minutes"
+          echo "Script limit: 27 minutes"
+          echo "Started at  : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          echo "========================================"
 
-          # 各実行が終了する前に確保する余裕
-          END_MARGIN=30
+          # ジョブ全体の30分制限より先に止め、
+          # 計測ファイルのアップロード時間を残す
+          set +e
+          timeout \
+            --signal=TERM \
+            --kill-after=20s \
+            27m \
+            node --unhandled-rejections=strict "$SCRIPT_FILE"
 
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "Started"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          EXIT_CODE=$?
+          set -e
 
-          while true; do
-            NOW="$(date +%s)"
-            REMAINING="$((SAFE_END_TS - NOW))"
+          echo "========================================"
+          echo "Finished at : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          echo "Exit code   : ${EXIT_CODE}"
+          echo "========================================"
 
-            if (( LONGEST > 0 )); then
-              # 過去最長時間 + 45秒を次回見積もりに使用
-              ESTIMATE="$((LONGEST + 45))"
+          if [ "$EXIT_CODE" -eq 124 ]; then
+            echo "::notice::27分の内部実行制限に到達したため、正常に停止しました。"
+            exit 0
+          fi
 
-              # 最低2分は確保
-              if (( ESTIMATE < 120 )); then
-                ESTIMATE=120
-              fi
-            else
-              ESTIMATE="$FIRST_ESTIMATE"
-            fi
+          if [ "$EXIT_CODE" -eq 137 ]; then
+            echo "::error::スクリプトが強制終了されました。メモリ不足または停止処理失敗の可能性があります。"
+            exit 137
+          fi
 
-            # 次の1回が安全に収まらない場合は開始しない
-            if (( REMAINING <= ESTIMATE + END_MARGIN )); then
-              break
-            fi
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "::error::レイドスクリプトがエラー終了しました。終了コード: ${EXIT_CODE}"
+            exit "$EXIT_CODE"
+          fi
 
-            COUNT="$((COUNT + 1))"
-            RUN_START="$(date +%s)"
-
-            # 現在の残り時間を超えて動き続けないための絶対上限
-            RUN_LIMIT="$((REMAINING - END_MARGIN))"
-
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Cycle #$COUNT"
-            echo "Remaining: ${REMAINING}s"
-            echo "Limit: ${RUN_LIMIT}s"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-            set +e
-
-            timeout \
-              --signal=TERM \
-              --kill-after=10s \
-              "${RUN_LIMIT}s" \
-              env CONCURRENCY="5" \
-              node "$TASK_FILE"
-
-            STATUS="$?"
-
-            set -e
-
-            RUN_END="$(date +%s)"
-            RUN_SECONDS="$((RUN_END - RUN_START))"
-
-            if (( RUN_SECONDS > LONGEST )); then
-              LONGEST="$RUN_SECONDS"
-            fi
-
-            echo ""
-            echo "Cycle #$COUNT finished in ${RUN_SECONDS}s"
-            echo "Status: $STATUS"
-
-            if (( STATUS == 124 || STATUS == 137 )); then
-              echo "::error::Time limit reached."
-              exit 1
-            fi
-
-            if (( STATUS != 0 )); then
-              echo "::error::Process failed with status $STATUS."
-              exit "$STATUS"
-            fi
-
-            # 次回まで60～120秒のランダム待機
-            WAIT_SECONDS="$(shuf -i 60-120 -n 1)"
-
-            NOW="$(date +%s)"
-            REMAINING="$((SAFE_END_TS - NOW))"
-
-            ESTIMATE="$((LONGEST + 45))"
-
-            if (( ESTIMATE < 120 )); then
-              ESTIMATE=120
-            fi
-
-            REQUIRED="$((WAIT_SECONDS + ESTIMATE + END_MARGIN))"
-
-            # 待機時間と次回処理時間の両方が収まらなければ終了
-            if (( REMAINING <= REQUIRED )); then
-              break
-            fi
-
-            echo "Pause: ${WAIT_SECONDS}s"
-
-            sleep "$WAIT_SECONDS"
-          done
-
-          FINISHED="$(date +%s)"
-          ELAPSED="$((FINISHED - START_TS))"
-
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "Completed: $COUNT"
-          echo "Longest: ${LONGEST}s"
-          echo "Elapsed: ${ELAPSED}s"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-          {
-            echo "## Result"
-            echo ""
-            echo "- Completed: **$COUNT**"
-            echo "- Longest: **${LONGEST}s**"
-            echo "- Elapsed: **${ELAPSED}s**"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Finish
+      - name: Show measurement summary
         if: always()
         shell: bash
         run: |
-          set +e
+          set -uo pipefail
 
-          if [[ -n "${TASK_DIR:-}" ]]; then
-            rm -rf "$TASK_DIR"
+          FILE="${GITHUB_WORKSPACE}/raid_measurements.jsonl"
+
+          if [ ! -f "$FILE" ]; then
+            echo "raid_measurements.jsonl は生成されませんでした。"
+            exit 0
           fi
 
-          echo "Finished."
+          echo "Measurement file:"
+          echo "  Path : $FILE"
+          echo "  Size : $(wc -c < "$FILE") bytes"
+          echo "  Lines: $(wc -l < "$FILE")"
+
+          echo ""
+          echo "Last 20 measurement records:"
+          tail -n 20 "$FILE" || true
+
+      - name: Upload raid measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raid-measurements-${{ github.run_id }}
+          path: raid_measurements.jsonl
+          if-no-files-found: warn
+          retention-days: 14
