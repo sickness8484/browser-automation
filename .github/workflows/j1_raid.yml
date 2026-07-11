@@ -1,4 +1,4 @@
-name: DragonCraze Raid Economy
+name: J1 Raid Economy
 
 on:
   workflow_dispatch:
@@ -7,48 +7,33 @@ permissions:
   contents: read
 
 concurrency:
-  group: dragoncraze-raid-economy
+  group: j1-raid-economy
   cancel-in-progress: false
 
 jobs:
   raid-economy:
     runs-on: ubuntu-latest
-
-    # セットアップ、実行、ログ保存を含むジョブ全体の上限
     timeout-minutes: 30
 
     env:
       NODE_ENV: production
-
-      # 同時実行アカウント数
       CONCURRENCY: "5"
-
-      # レイド処理設定
       CYCLES: "12"
       MIN_WAIT_SECONDS: "60"
       MAX_WAIT_SECONDS: "120"
-
-      # 自発用に確保するBP
       SELF_RESERVE_BP: "60"
-
-      # 計測ログ
       RAID_MEASURE_FILE: "${{ github.workspace }}/raid_measurements.jsonl"
-
-      # Node 20への一時退避は使用しない
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Setup Node.js 24
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: "24"
-
-          # package-lock.jsonがない環境でも失敗しないように無効化
           package-manager-cache: false
 
       - name: Show runtime versions
@@ -56,64 +41,44 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Node version:"
-          node --version
+          echo "Node: $(node --version)"
+          echo "npm : $(npm --version)"
 
-          echo "npm version:"
-          npm --version
-
-      - name: Install dependencies
+      - name: Install Playwright
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ -f package-lock.json ]; then
-            echo "package-lock.json found: running npm ci"
-            npm ci
-          elif [ -f package.json ]; then
-            echo "package.json found without lockfile: running npm install"
-            npm install
-          else
-            echo "No package.json found: creating temporary npm project"
+          if [ ! -f package.json ]; then
             npm init -y
           fi
 
-          if node -e "require.resolve('playwright')" >/dev/null 2>&1; then
-            echo "Playwright is already installed."
-          else
-            echo "Installing Playwright..."
-            npm install --no-save playwright
-          fi
-
-      - name: Install Chromium
-        shell: bash
-        run: |
-          set -euo pipefail
-
+          npm install --no-save playwright
           npx playwright install --with-deps chromium
 
-      - name: Verify raid script
+      - name: Create J1 raid script
         shell: bash
+        env:
+          RAID_SCRIPT_SOURCE: ${{ secrets.j1_raid_js }}
         run: |
           set -euo pipefail
 
-          SCRIPT_FILE="dragoncraze_raid_economy_v4.js"
+          SCRIPT_FILE="j1_raid.js"
 
-          if [ ! -f "$SCRIPT_FILE" ]; then
-            echo "::error::${SCRIPT_FILE} がリポジトリ直下にありません。"
-            echo ""
-            echo "リポジトリ内のJavaScriptファイル:"
-            find . -maxdepth 3 -type f -name "*.js" -print | sort
+          if [ -z "${RAID_SCRIPT_SOURCE:-}" ]; then
+            echo "::error::Secret j1_raid_js が未設定、または空です。"
             exit 1
           fi
 
+          printf '%s' "$RAID_SCRIPT_SOURCE" > "$SCRIPT_FILE"
+
           FILE_SIZE="$(wc -c < "$SCRIPT_FILE")"
 
-          echo "Script file : $SCRIPT_FILE"
-          echo "Script size : $FILE_SIZE bytes"
+          echo "Script created: $SCRIPT_FILE"
+          echo "Script size   : $FILE_SIZE bytes"
 
           if [ "$FILE_SIZE" -lt 1000 ]; then
-            echo "::error::スクリプトのサイズが小さすぎます。貼り付けが途中で切れている可能性があります。"
+            echo "::error::生成されたJSが小さすぎます。Secretへの貼り付けが途中で切れている可能性があります。"
             exit 1
           fi
 
@@ -131,15 +96,20 @@ jobs:
           echo "Measurement file initialized:"
           echo "${GITHUB_WORKSPACE}/raid_measurements.jsonl"
 
-      - name: Run raid economy
+      - name: Run J1 raid script
         shell: bash
         run: |
           set -euo pipefail
 
-          SCRIPT_FILE="dragoncraze_raid_economy_v4.js"
+          SCRIPT_FILE="j1_raid.js"
+
+          if [ ! -f "$SCRIPT_FILE" ]; then
+            echo "::error::${SCRIPT_FILE} が存在しません。"
+            exit 1
+          fi
 
           echo "========================================"
-          echo "DragonCraze Raid Economy"
+          echo "J1 Raid Economy"
           echo "Node        : $(node --version)"
           echo "Concurrency : ${CONCURRENCY}"
           echo "Cycles      : ${CYCLES}"
@@ -150,8 +120,6 @@ jobs:
 
           set +e
 
-          # ジョブ全体30分より先に終了させ、
-          # ログ出力とArtifact保存の時間を確保する
           timeout \
             --signal=TERM \
             --kill-after=20s \
@@ -171,26 +139,26 @@ jobs:
 
           case "$EXIT_CODE" in
             0)
-              echo "Raid script completed successfully."
+              echo "J1 raid script completed successfully."
               ;;
 
             124)
-              echo "::notice::25分の内部制限に到達したため、スクリプトを終了しました。"
+              echo "::notice::25分の内部タイムアウトに到達したため終了しました。"
+              exit 0
+              ;;
+
+            143)
+              echo "::notice::TERMシグナルによって停止しました。"
               exit 0
               ;;
 
             137)
-              echo "::error::スクリプトが強制終了されました。メモリ不足または終了処理失敗の可能性があります。"
+              echo "::error::強制終了されました。メモリ不足または停止処理失敗の可能性があります。"
               exit 137
               ;;
 
-            143)
-              echo "::notice::タイムアウトのTERMシグナルにより終了しました。"
-              exit 0
-              ;;
-
             *)
-              echo "::error::レイドスクリプトがエラー終了しました。終了コード: ${EXIT_CODE}"
+              echo "::error::スクリプトがエラー終了しました。終了コード: ${EXIT_CODE}"
               exit "$EXIT_CODE"
               ;;
           esac
@@ -208,7 +176,7 @@ jobs:
           echo "========================================"
 
           if [ ! -f "$FILE" ]; then
-            echo "raid_measurements.jsonl は存在しません。"
+            echo "raid_measurements.jsonl は生成されませんでした。"
             exit 0
           fi
 
@@ -219,18 +187,17 @@ jobs:
           echo "Size : $FILE_SIZE bytes"
           echo "Lines: $LINE_COUNT"
 
-          if [ "$LINE_COUNT" -gt 0 ]; then
+          if [ -s "$FILE" ]; then
             echo ""
             echo "Last 30 records:"
             tail -n 30 "$FILE" || true
           else
-            echo ""
-            echo "計測レコードはまだ書き込まれていません。"
+            echo "計測レコードはありません。"
           fi
 
       - name: Upload raid measurements
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: raid-measurements-${{ github.run_id }}
           path: raid_measurements.jsonl
