@@ -1,10 +1,10 @@
-name: J1 Raid Runner
+name: J1 Raid 30-Minute Loop
 
 on:
   workflow_dispatch:
     inputs:
-      concurrency:
-        description: "同時実行アカウント数"
+      account_concurrency:
+        description: "スクリプト内部の同時処理アカウント数"
         required: true
         default: "1"
         type: choice
@@ -15,26 +15,29 @@ on:
 permissions:
   contents: read
 
-# 同じワークフローが重複起動しても、先に動いている処理を中断しない
+# 同じ処理の二重起動を防止する
 concurrency:
-  group: j1-raid-runner
+  group: j1-raid-30-minute-loop
   cancel-in-progress: false
 
 jobs:
   run-j1-raid:
-    name: Run J1 Raid Script
+    name: Run J1 Raid Repeatedly
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+
+    # GitHub側の絶対上限
+    timeout-minutes: 30
 
     env:
       CI: "true"
 
-      # 初回は1を推奨。安定確認後、手動実行画面から2を選択
-      CONCURRENCY: ${{ inputs.concurrency }}
+      # スクリプト内部のアカウント並列数
+      CONCURRENCY: ${{ inputs.account_concurrency }}
 
       MAX_QUEST_ADVANCES: "15"
       MAX_QUEST_ITERATIONS: "40"
       MAX_RESCUE_HITS: "30"
+      MAX_SAME_QUEST_STATE: "2"
 
       QUEST_HTTP_ENABLED: "1"
       QUEST_HTTP_FALLBACK_TO_BROWSER: "1"
@@ -49,13 +52,31 @@ jobs:
       LOG_LEVEL: "info"
 
     steps:
+      # このステップを最初に置き、セットアップ時間も30分枠へ含める
+      - name: Start 30-minute timer
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          STARTED_AT="$(date +%s)"
+
+          # GitHubの30分強制終了より60秒早い29分で内部終了する
+          SAFE_END_AT="$((STARTED_AT + 1740))"
+
+          echo "J1_JOB_STARTED_AT=$STARTED_AT" >> "$GITHUB_ENV"
+          echo "J1_SAFE_END_AT=$SAFE_END_AT" >> "$GITHUB_ENV"
+
+          echo "Job timer started."
+          echo "Hard timeout : 30 minutes"
+          echo "Safe deadline: 29 minutes"
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "24"
           package-manager-cache: false
 
-      - name: Restore script from J1_RAID_JS
+      - name: Restore J1 script from Secret
         shell: bash
         env:
           J1_RAID_JS: ${{ secrets.J1_RAID_JS }}
@@ -71,24 +92,28 @@ jobs:
           chmod 700 "$WORK_DIR"
 
           if [[ -z "${J1_RAID_JS:-}" ]]; then
-            echo "::error::Secret J1_RAID_JS が空、未登録、または参照できません。"
+            echo "::error::Secret J1_RAID_JS が空、または未登録です。"
             exit 1
           fi
 
-          # echoは使わず、改行や特殊文字を保持したまま復元する
+          # Secretの内容をそのままファイルへ復元
           printf '%s' "$J1_RAID_JS" > "$SCRIPT_FILE"
           chmod 600 "$SCRIPT_FILE"
 
-          # 後続プロセスへSecret本体を環境変数として残さない
-          unset J1_RAID_JS
+          if [[ ! -s "$SCRIPT_FILE" ]]; then
+            echo "::error::復元したJSファイルが空です。"
+            exit 1
+          fi
 
           echo "J1_WORK_DIR=$WORK_DIR" >> "$GITHUB_ENV"
           echo "J1_SCRIPT_FILE=$SCRIPT_FILE" >> "$GITHUB_ENV"
 
-          echo "Script restored successfully."
+          unset J1_RAID_JS
+
+          echo "Secret restored."
           echo "Script contents are not printed."
 
-      - name: Install Playwright
+      - name: Install Playwright and Chromium
         shell: bash
         run: |
           set -euo pipefail
@@ -105,7 +130,7 @@ jobs:
 
           npx playwright install --with-deps chromium
 
-      - name: Validate script
+      - name: Validate restored script
         shell: bash
         run: |
           set -euo pipefail
@@ -115,19 +140,158 @@ jobs:
 
           echo "JavaScript syntax check passed."
 
-      - name: Run J1 Raid
+      - name: Run repeatedly for up to 29 minutes
         shell: bash
         run: |
           set -euo pipefail
 
-          node "$J1_SCRIPT_FILE"
+          RUN_COUNT=0
+          MAX_RUN_SECONDS=0
 
-      - name: Cleanup restored secret
+          # 実測値がない初回に使う推定実行時間
+          INITIAL_RUN_ESTIMATE=180
+
+          # 各実行の終了処理用余裕
+          PER_RUN_END_MARGIN=15
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "J1 repeated execution started"
+          echo "Random interval: 60–120 seconds"
+          echo "Internal deadline: 29 minutes"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          while true; do
+            NOW="$(date +%s)"
+            REMAINING="$((J1_SAFE_END_AT - NOW))"
+
+            if (( MAX_RUN_SECONDS > 0 )); then
+              # 過去最長実行時間の1.5倍 + 30秒を次回の安全見積りにする
+              NEXT_RUN_ESTIMATE="$(((MAX_RUN_SECONDS * 3 + 1) / 2 + 30))"
+
+              # 過小評価を防ぐため最低180秒を確保
+              if (( NEXT_RUN_ESTIMATE < 180 )); then
+                NEXT_RUN_ESTIMATE=180
+              fi
+            else
+              NEXT_RUN_ESTIMATE="$INITIAL_RUN_ESTIMATE"
+            fi
+
+            echo ""
+            echo "Current runs       : $RUN_COUNT"
+            echo "Remaining seconds  : $REMAINING"
+            echo "Next run estimate  : $NEXT_RUN_ESTIMATE"
+            echo "Longest run        : $MAX_RUN_SECONDS"
+
+            # 次の1回が安全に収まらない場合は開始しない
+            if (( REMAINING <= NEXT_RUN_ESTIMATE )); then
+              echo "次の1回を安全に完了できる時間がないため終了します。"
+              break
+            fi
+
+            RUN_COUNT="$((RUN_COUNT + 1))"
+            RUN_STARTED_AT="$(date +%s)"
+
+            # 現在の残り時間から終了余裕を引いた値を絶対上限にする
+            RUN_TIMEOUT="$((REMAINING - PER_RUN_END_MARGIN))"
+
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Run #$RUN_COUNT started"
+            echo "Per-run timeout: ${RUN_TIMEOUT}s"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+            set +e
+            timeout \
+              --signal=TERM \
+              --kill-after=10s \
+              "${RUN_TIMEOUT}s" \
+              node "$J1_SCRIPT_FILE"
+            RUN_STATUS="$?"
+            set -e
+
+            RUN_FINISHED_AT="$(date +%s)"
+            RUN_SECONDS="$((RUN_FINISHED_AT - RUN_STARTED_AT))"
+
+            if (( RUN_SECONDS > MAX_RUN_SECONDS )); then
+              MAX_RUN_SECONDS="$RUN_SECONDS"
+            fi
+
+            echo "Run #$RUN_COUNT finished in ${RUN_SECONDS}s"
+            echo "Exit status: $RUN_STATUS"
+
+            if (( RUN_STATUS == 124 || RUN_STATUS == 137 )); then
+              echo "::error::Run #$RUN_COUNT が時間上限で強制終了されました。"
+              exit 1
+            fi
+
+            if (( RUN_STATUS != 0 )); then
+              echo "::error::Run #$RUN_COUNT が終了コード $RUN_STATUS で失敗しました。"
+              exit "$RUN_STATUS"
+            fi
+
+            # ここで次回までの待機時間を60～120秒からランダム選択
+            WAIT_SECONDS="$(shuf -i 60-120 -n 1)"
+
+            NOW="$(date +%s)"
+            REMAINING="$((J1_SAFE_END_AT - NOW))"
+
+            NEXT_RUN_ESTIMATE="$(((MAX_RUN_SECONDS * 3 + 1) / 2 + 30))"
+            if (( NEXT_RUN_ESTIMATE < 180 )); then
+              NEXT_RUN_ESTIMATE=180
+            fi
+
+            REQUIRED_SECONDS="$((WAIT_SECONDS + NEXT_RUN_ESTIMATE))"
+
+            echo ""
+            echo "Random wait        : ${WAIT_SECONDS}s"
+            echo "Remaining seconds  : ${REMAINING}s"
+            echo "Required for next  : ${REQUIRED_SECONDS}s"
+
+            # 待機時間と次回実行時間の両方が収まらなければ終了
+            if (( REMAINING <= REQUIRED_SECONDS )); then
+              echo "待機後の次回実行が29分以内に収まらないため終了します。"
+              break
+            fi
+
+            # 現在の実測値を基に、あと何回程度入るか表示
+            AVERAGE_CYCLE="$((NEXT_RUN_ESTIMATE + 90))"
+            ESTIMATED_MORE="$((REMAINING / AVERAGE_CYCLE))"
+
+            echo "Estimated more runs: approximately $ESTIMATED_MORE"
+            echo "Waiting ${WAIT_SECONDS}s before next run..."
+
+            sleep "$WAIT_SECONDS"
+          done
+
+          FINISHED_AT="$(date +%s)"
+          TOTAL_SECONDS="$((FINISHED_AT - J1_JOB_STARTED_AT))"
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "J1 repeated execution completed"
+          echo "Completed runs : $RUN_COUNT"
+          echo "Longest run    : ${MAX_RUN_SECONDS}s"
+          echo "Total elapsed  : ${TOTAL_SECONDS}s"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          {
+            echo "## J1 Raid Loop Summary"
+            echo ""
+            echo "- Completed runs: **$RUN_COUNT**"
+            echo "- Longest run: **${MAX_RUN_SECONDS}s**"
+            echo "- Total elapsed: **${TOTAL_SECONDS}s**"
+            echo "- Random interval: **60–120 seconds**"
+            echo "- Internal deadline: **29 minutes**"
+            echo "- Job timeout: **30 minutes**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup restored Secret
         if: always()
         shell: bash
         run: |
+          set +e
+
           if [[ -n "${J1_WORK_DIR:-}" ]]; then
             rm -rf "$J1_WORK_DIR"
           fi
 
-          echo "Temporary script removed."
+          echo "Temporary files removed."
