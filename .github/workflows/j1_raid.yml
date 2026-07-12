@@ -1,4 +1,4 @@
-name: J1 Raid Economy
+name: J1 Raid Economy v7.1
 
 on:
   workflow_dispatch:
@@ -10,19 +10,57 @@ concurrency:
   group: j1-raid-economy
   cancel-in-progress: false
 
+env:
+  NODE_ENV: production
+
+  # 6アカウントを同時に初期化・処理する。
+  CONCURRENCY: 6
+
+  # JS内部は23分、外側timeoutは24分、ジョブ全体は30分。
+  RUN_BUDGET_MS: 1380000
+
+  # イベント駆動スケジューラ。
+  OWN_CHECK_INTERVAL_SEC: 90
+  QUEST_RETRY_SEC: 120
+  IDLE_POLL_MAX_SEC: 30
+  SUMMARY_INTERVAL_SEC: 300
+
+  # コンボは前回攻撃から10分。
+  COMBO_WINDOW_SEC: 600
+  OWN_COMBO_MIN: 10
+  RESCUE_COMBO_MIN: 15
+  OWN_PROTECT_10_14_SEC: 480
+  OWN_PROTECT_15_29_SEC: 465
+  OWN_PROTECT_30_PLUS_SEC: 450
+  RESCUE_PROTECT_SEC: 480
+  COMBO_LOCK_MS: 45000
+  COMBO_RECHECK_FLOOR_SEC: 60
+
+  # 新規自発は発見から3・7・13分。起動時に既に存在する自発は30秒・5分30秒・11分30秒。
+  RESCUE_WAVE_OFFSETS_SEC: 180,420,780
+  RESCUE_EXISTING_WAVE_OFFSETS_SEC: 30,330,690
+  MAX_RESCUE_LIST_LOADS: 3
+  MAX_RESCUES_PER_WAVE: 12
+  RESCUE_CACHE_TTL_SEC: 7200
+
+  # BP・火力判断。
+  BP_OVERFLOW_MARGIN: 3
+  MAX_OWN_PAID_HITS_PER_CYCLE: 3
+  MAX_EXTERNAL_RESCUE_PAID_PER_RUN: 2
+  DEFAULT_NORMAL_DAMAGE: 500000
+  DEFAULT_FULL_RATIO_X100: 280
+  FINISH_SAFETY_X100: 120
+
+  # デッキ・計測。
+  DECK_AUTO_SWITCH: 'true'
+  DECK_SCAN_MAX: 12
+  MEASURE_ENABLED: 'true'
+  MEASURE_LOG_PATH: ${{ github.workspace }}/raid_measurements.jsonl
+
 jobs:
   raid-economy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
-    env:
-      NODE_ENV: production
-      CONCURRENCY: "5"
-      CYCLES: "12"
-      MIN_WAIT_SECONDS: "60"
-      MAX_WAIT_SECONDS: "120"
-      SELF_RESERVE_BP: "60"
-      RAID_MEASURE_FILE: "${{ github.workspace }}/raid_measurements.jsonl"
 
     steps:
       - name: Checkout repository
@@ -33,16 +71,14 @@ jobs:
       - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
-          package-manager-cache: false
+          node-version: '24'
 
       - name: Show runtime versions
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "Node: $(node --version)"
-          echo "npm : $(npm --version)"
+          node --version
+          npm --version
 
       - name: Install Playwright
         shell: bash
@@ -50,7 +86,7 @@ jobs:
           set -euo pipefail
 
           if [ ! -f package.json ]; then
-            npm init -y
+            npm init -y >/dev/null 2>&1
           fi
 
           npm install --no-save playwright
@@ -71,30 +107,33 @@ jobs:
           fi
 
           printf '%s' "$RAID_SCRIPT_SOURCE" > "$SCRIPT_FILE"
-
           FILE_SIZE="$(wc -c < "$SCRIPT_FILE")"
 
           echo "Script created: $SCRIPT_FILE"
           echo "Script size   : $FILE_SIZE bytes"
 
-          if [ "$FILE_SIZE" -lt 1000 ]; then
+          if [ "$FILE_SIZE" -lt 15000 ]; then
             echo "::error::生成されたJSが小さすぎます。Secretへの貼り付けが途中で切れている可能性があります。"
             exit 1
           fi
 
           node --check "$SCRIPT_FILE"
-
           echo "JavaScript syntax check passed."
+
+      - name: Run parser self-test
+        shell: bash
+        env:
+          V7_SELF_TEST_ONLY: '1'
+          ALLOW_DUMMY_AUTH: '1'
+        run: |
+          set -euo pipefail
+          node --unhandled-rejections=strict j1_raid.js
 
       - name: Initialize measurement file
         shell: bash
         run: |
           set -euo pipefail
-
-          : > "${GITHUB_WORKSPACE}/raid_measurements.jsonl"
-
-          echo "Measurement file initialized:"
-          echo "${GITHUB_WORKSPACE}/raid_measurements.jsonl"
+          : > "$MEASURE_LOG_PATH"
 
       - name: Run J1 raid script
         shell: bash
@@ -103,33 +142,25 @@ jobs:
 
           SCRIPT_FILE="j1_raid.js"
 
-          if [ ! -f "$SCRIPT_FILE" ]; then
-            echo "::error::${SCRIPT_FILE} が存在しません。"
-            exit 1
-          fi
-
           echo "========================================"
-          echo "J1 Raid Economy"
-          echo "Node        : $(node --version)"
-          echo "Concurrency : ${CONCURRENCY}"
-          echo "Cycles      : ${CYCLES}"
-          echo "Job timeout : 30 minutes"
-          echo "Script limit: 25 minutes"
-          echo "Started at  : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          echo "J1 Raid Economy v7.1"
+          echo "Node               : $(node --version)"
+          echo "Account concurrency: ${CONCURRENCY}"
+          echo "Internal budget    : $((RUN_BUDGET_MS / 60000)) minutes"
+          echo "External limit     : 24 minutes"
+          echo "Idle page policy   : pages closed; contexts retained"
+          echo "Started at         : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           echo "========================================"
 
           set +e
-
           timeout \
             --signal=TERM \
-            --kill-after=20s \
-            25m \
+            --kill-after=60s \
+            24m \
             node \
               --unhandled-rejections=strict \
               "$SCRIPT_FILE"
-
           EXIT_CODE=$?
-
           set -e
 
           echo "========================================"
@@ -141,22 +172,18 @@ jobs:
             0)
               echo "J1 raid script completed successfully."
               ;;
-
             124)
-              echo "::notice::25分の内部タイムアウトに到達したため終了しました。"
+              echo "::notice::24分の外部タイムアウトに到達したため終了しました。"
               exit 0
               ;;
-
             143)
-              echo "::notice::TERMシグナルによって停止しました。"
+              echo "::notice::TERMシグナルによって正常停止しました。"
               exit 0
               ;;
-
             137)
-              echo "::error::強制終了されました。メモリ不足または停止処理失敗の可能性があります。"
+              echo "::error::60秒の終了猶予後も停止できず、強制終了されました。"
               exit 137
               ;;
-
             *)
               echo "::error::スクリプトがエラー終了しました。終了コード: ${EXIT_CODE}"
               exit "$EXIT_CODE"
@@ -167,33 +194,17 @@ jobs:
         if: always()
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
 
-          FILE="${GITHUB_WORKSPACE}/raid_measurements.jsonl"
-
-          echo "========================================"
-          echo "Measurement summary"
-          echo "========================================"
-
-          if [ ! -f "$FILE" ]; then
-            echo "raid_measurements.jsonl は生成されませんでした。"
+          if [ ! -s "$MEASURE_LOG_PATH" ]; then
+            echo "Measurement file is empty."
             exit 0
           fi
 
-          FILE_SIZE="$(wc -c < "$FILE")"
-          LINE_COUNT="$(wc -l < "$FILE")"
-
-          echo "Path : $FILE"
-          echo "Size : $FILE_SIZE bytes"
-          echo "Lines: $LINE_COUNT"
-
-          if [ -s "$FILE" ]; then
-            echo ""
-            echo "Last 30 records:"
-            tail -n 30 "$FILE" || true
-          else
-            echo "計測レコードはありません。"
-          fi
+          echo "Measurement lines: $(wc -l < "$MEASURE_LOG_PATH")"
+          echo "Measurement bytes: $(wc -c < "$MEASURE_LOG_PATH")"
+          echo "----- Last 40 records -----"
+          tail -n 40 "$MEASURE_LOG_PATH"
 
       - name: Upload raid measurements
         if: always()
