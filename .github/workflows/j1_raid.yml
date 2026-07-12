@@ -1,4 +1,4 @@
-name: J1 Raid Economy v7.7
+name: J1 Raid Economy v7.7.1.1
 
 on:
   workflow_dispatch:
@@ -160,7 +160,29 @@ jobs:
           node --check "$SCRIPT_FILE"
           echo "JavaScript syntax check passed."
 
-      - name: Run v7.7 parser, form recovery, state and mutex self-test
+          node <<'NODE'
+          const fs = require('node:fs');
+          const source = fs.readFileSync('j1_raid.js', 'utf8');
+
+          if (!/process\.env\.AUTH_URLS_TEXT\s*=\s*AUTH_URLS\.join\(/.test(source)) {
+            console.error('::error::認証URL配列を本体へ渡すAUTH_URLS_TEXTブリッジがありません。壊れたv7.7ではなくv7.7.1 Compactを使用してください。');
+            process.exit(1);
+          }
+
+          const block = source.match(/const\s+AUTH_URLS\s*=\s*\[([\s\S]*?)\];/);
+          const count = block
+            ? (block[1].match(/https:\/\/dragoncraze\.com\/account\/mail_confirmation\?/g) || []).length
+            : 0;
+
+          if (count < 1) {
+            console.error('::error::AUTH_URLS配列から認証URLを検出できません。');
+            process.exit(1);
+          }
+
+          console.log(`Auth URL handoff bridge passed. Entries: ${count}`);
+          NODE
+
+      - name: Run v7.7.1 parser, auth bridge, form recovery, state and mutex self-test
         shell: bash
         env:
           V7_SELF_TEST_ONLY: '1'
@@ -184,7 +206,7 @@ jobs:
           SCRIPT_FILE="j1_raid.js"
 
           echo "========================================"
-          echo "J1 Raid Economy v7.7"
+          echo "J1 Raid Economy v7.7.1"
           echo "Node               : $(node --version)"
           echo "Account concurrency: ${CONCURRENCY}"
           echo "Raid attack policy : same raid serialized"
