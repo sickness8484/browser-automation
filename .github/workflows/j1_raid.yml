@@ -1,4 +1,4 @@
-name: J1 Raid Economy v7.6
+name: J1 Raid Economy v7.7
 
 on:
   workflow_dispatch:
@@ -21,8 +21,8 @@ env:
   RUN_BUDGET_MS: 1380000
 
   # イベント駆動スケジューラ。
-  OWN_CHECK_INTERVAL_SEC: 90
-  QUEST_RETRY_SEC: 120
+  OWN_CHECK_INTERVAL_SEC: 60
+  QUEST_RETRY_SEC: 60
   IDLE_POLL_MAX_SEC: 30
   SUMMARY_INTERVAL_SEC: 300
 
@@ -36,9 +36,13 @@ env:
   # 同一物理レイドへの攻撃競合防止。
   RAID_ATTACK_LOCK_WAIT_WARN_MS: 1500
 
-  # v7.6: lock取得後の最新readyに攻撃フォームが出ない場合の再確認間隔。
+  # lock取得後の最新readyに攻撃フォームが出ない場合の再確認間隔。
   # canonical ready再取得と、同一レイドと確認できた元フォームへの復旧を先に試す。
   FORM_MISSING_RETRY_SEC: 120
+
+  # 有料攻撃がHP・BP・戦況の全て不変だった場合だけ短時間で再確認。
+  PAID_NOOP_RETRY_SEC: 30
+  PAID_NOOP_MAX_RETRIES: 2
 
   # 管理アカウントの攻撃直後のHP減少を、外部DPSへ混ぜない。
   MANAGED_ACTION_SUPPRESS_SEC: 30
@@ -60,20 +64,22 @@ env:
   COMBO_LOCK_MS: 45000
   COMBO_RECHECK_FLOOR_SEC: 60
 
-  # 実測では第1波が最多、第3波は13分付近でほぼ空だったため11分へ前倒し。
-  # 新規自発: 3分・7分・11分。起動時に既存: 30秒・5分・10分。
-  RESCUE_WAVE_OFFSETS_SEC: 180,420,660
-  RESCUE_EXISTING_WAVE_OFFSETS_SEC: 30,300,600
+  # 救援波の時刻は「最短確認時刻」。ready画面に救援依頼あり/NEWが出た時だけストックを消費する。
+  # 新規自発: 最短1分・4分・8分。起動時既存: 30秒・3分・7分。
+  RESCUE_WAVE_OFFSETS_SEC: 60,240,480
+  RESCUE_EXISTING_WAVE_OFFSETS_SEC: 30,180,420
+  RESCUE_SIGNAL_RECHECK_SEC: 30
+  RESCUE_SIGNAL_FORCE_AFTER_SEC: 600
   MAX_RESCUE_LIST_LOADS: 3
   MAX_RESCUES_PER_WAVE: 12
   RESCUE_CACHE_TTL_SEC: 7200
 
   # BP・火力判断。管理自発を最優先する。
   BP_OVERFLOW_MARGIN: 3
-  MAX_OWN_PAID_HITS_PER_CYCLE: 3
+  MAX_OWN_PAID_HITS_PER_CYCLE: 5
   MAX_EXTERNAL_RESCUE_PAID_PER_RUN: 2
   DEFAULT_NORMAL_DAMAGE: 500000
-  DEFAULT_FULL_RATIO_X100: 280
+  DEFAULT_FULL_RATIO_X100: 250
   FINISH_SAFETY_X100: 120
 
   # デッキ・計測。
@@ -154,7 +160,7 @@ jobs:
           node --check "$SCRIPT_FILE"
           echo "JavaScript syntax check passed."
 
-      - name: Run v7.6 parser, form recovery, state and mutex self-test
+      - name: Run v7.7 parser, form recovery, state and mutex self-test
         shell: bash
         env:
           V7_SELF_TEST_ONLY: '1'
@@ -178,7 +184,7 @@ jobs:
           SCRIPT_FILE="j1_raid.js"
 
           echo "========================================"
-          echo "J1 Raid Economy v7.6"
+          echo "J1 Raid Economy v7.7"
           echo "Node               : $(node --version)"
           echo "Account concurrency: ${CONCURRENCY}"
           echo "Raid attack policy : same raid serialized"
@@ -186,7 +192,7 @@ jobs:
           echo "Internal budget    : $((RUN_BUDGET_MS / 60000)) minutes"
           echo "External limit     : 24 minutes"
           echo "Idle page policy   : pages closed; contexts retained"
-          echo "Rescue waves       : ${RESCUE_WAVE_OFFSETS_SEC}"
+          echo "Rescue wave earliest: ${RESCUE_WAVE_OFFSETS_SEC} (signal-gated)"
           echo "Started at         : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           echo "========================================"
 
@@ -248,7 +254,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: raid-measurements-v7-6-${{ github.run_id }}
+          name: raid-measurements-v7-7-${{ github.run_id }}
           path: raid_measurements.jsonl
           if-no-files-found: warn
           retention-days: 14
