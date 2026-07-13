@@ -1,4 +1,4 @@
-name: J1 Raid Economy v7.8
+name: J1 Raid Economy v7.9
 
 on:
   workflow_dispatch:
@@ -17,13 +17,16 @@ env:
   # 6アカウントを最大6並列。同一物理レイドへの攻撃だけJS内部mutexで直列化。
   CONCURRENCY: 6
 
-  # 30分周期のうち本体25分。外側27分で停止猶予を確保する。
-  RUN_BUDGET_MS: 1500000
+  # 30分周期のうち本体26分。外側28分で停止猶予を確保する。
+  RUN_BUDGET_MS: 1560000
 
-  # 自発が出なかった場合の空白を短縮。
-  OWN_CHECK_INTERVAL_SEC: 60
+  # 自発が出なかった場合の空白を短縮。MAX_QUEST_ADVANCESは毎回の試行単位で適用する。
+  OWN_CHECK_INTERVAL_SEC: 45
   QUEST_RETRY_SEC: 30
-  IDLE_POLL_MAX_SEC: 30
+  QUEST_CAP_RETRY_SEC: 5
+  MAX_QUEST_ADVANCES: 15
+  MAX_QUEST_ITERATIONS: 40
+  IDLE_POLL_MAX_SEC: 20
   SUMMARY_INTERVAL_SEC: 300
 
   # 実行間で安全な数値・状態だけを引き継ぐ。認証URL/Cookie/CSRFは保存しない。
@@ -48,8 +51,10 @@ env:
   FORM_MISSING_RETRY_SEC: 120
 
   # 有料攻撃がHP・BP・戦況のすべて不変だった場合だけ短時間で再確認。
+  # 適用確認後は同じアカウントの即時連打を避け、30秒後に再判断する。
   PAID_NOOP_RETRY_SEC: 30
   PAID_NOOP_MAX_RETRIES: 2
+  PAID_SUCCESS_COOLDOWN_SEC: 30
 
   # 管理アカウントの攻撃を外部DPSへ混ぜない。
   MANAGED_ACTION_SUPPRESS_SEC: 30
@@ -100,7 +105,7 @@ env:
 jobs:
   raid-economy:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 36
 
     steps:
       - name: Checkout repository
@@ -113,8 +118,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .raid-state/raid_state.json
-          key: raid-state-v7-8-${{ github.run_id }}-${{ github.run_attempt }}
+          key: raid-state-v7-9-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            raid-state-v7-9-
             raid-state-v7-8-
 
       - name: Inspect restored state
@@ -124,7 +130,7 @@ jobs:
           mkdir -p .raid-state
           STATE_FILE=".raid-state/raid_state.json"
           if [ ! -s "$STATE_FILE" ]; then
-            echo "No previous state was restored. This is normal on the first v7.8 run."
+            echo "No previous v7.9/v7.8 state was restored. This is normal on the first persistent-state run."
             exit 0
           fi
           node <<'NODE'
@@ -235,17 +241,32 @@ jobs:
             process.exit(1);
           }
 
+          if (inner.includes('t.result.questAdvances<n.MAX_QUEST_ADVANCES') ||
+              inner.includes('t.result.questAdvances>=n.MAX_QUEST_ADVANCES')) {
+            console.error('::error::クエスト上限が累積値へ直接適用されています。実行中に永久停止する回帰です。');
+            process.exit(1);
+          }
+
+          if (!inner.includes('questAttemptAdvances(q,t.result.questAdvances)')) {
+            console.error('::error::クエストの試行単位カウンターを検出できません。');
+            process.exit(1);
+          }
+
           const requiredMarkers = [
-            'SELF_TEST_OK_V7_8',
-            'DragonCraze Raid Economy v7.8',
+            'SELF_TEST_OK_V7_9',
+            'DragonCraze Raid Economy v7.9',
             'persistent_state_saved',
             'persistent_state_session_restored',
             'PERSIST_STATE_PATH',
-            'PERSIST_EXTERNAL_DPS_DISCOUNT_X100'
+            'PERSIST_EXTERNAL_DPS_DISCOUNT_X100',
+            'questAttemptAdvances',
+            'QUEST_CAP_RETRY_SEC',
+            'paid_success_cooldown_scheduled',
+            'PAID_SUCCESS_COOLDOWN_SEC'
           ];
           for (const marker of requiredMarkers) {
             if (!inner.includes(marker)) {
-              console.error(`::error::v7.8必須マーカーがありません: ${marker}`);
+              console.error(`::error::v7.9必須マーカーがありません: ${marker}`);
               process.exit(1);
             }
           }
@@ -255,15 +276,15 @@ jobs:
           console.log('Compressed-source regression checks passed.');
           NODE
 
-      - name: Run v7.8 parser, state, mutex and regression self-test
+      - name: Run v7.9 parser, state, mutex and regression self-test
         shell: bash
         env:
           V7_SELF_TEST_ONLY: '1'
           ALLOW_DUMMY_AUTH: '1'
           MEASURE_ENABLED: 'false'
           PERSIST_STATE_ENABLED: 'true'
-          V78_STATE_IO_SELF_TEST: '1'
-          PERSIST_STATE_PATH: ${{ runner.temp }}/v78-self-test/state.json
+          V79_STATE_IO_SELF_TEST: '1'
+          PERSIST_STATE_PATH: ${{ runner.temp }}/v79-self-test/state.json
         run: |
           set -euo pipefail
           node --unhandled-rejections=strict j1_raid.js
@@ -282,14 +303,16 @@ jobs:
           SCRIPT_FILE="j1_raid.js"
 
           echo "========================================"
-          echo "J1 Raid Economy v7.8"
+          echo "J1 Raid Economy v7.9"
           echo "Node               : $(node --version)"
           echo "Account concurrency: ${CONCURRENCY}"
           echo "Raid attack policy : same raid serialized"
           echo "Persistent learning: deck, damage, raid/rescue state"
           echo "Internal budget    : $((RUN_BUDGET_MS / 60000)) minutes"
-          echo "External limit     : 27 minutes"
-          echo "Quest retry        : ${QUEST_RETRY_SEC} seconds"
+          echo "External limit     : 28 minutes"
+          echo "Quest retry        : ${QUEST_RETRY_SEC}s (cap retry ${QUEST_CAP_RETRY_SEC}s)"
+          echo "Quest budget       : ${MAX_QUEST_ADVANCES} advances per attempt"
+          echo "Paid success wait  : ${PAID_SUCCESS_COOLDOWN_SEC} seconds"
           echo "Idle page policy   : pages closed; contexts retained"
           echo "Rescue wave earliest: ${RESCUE_WAVE_OFFSETS_SEC} (signal-gated)"
           echo "Started at         : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -299,7 +322,7 @@ jobs:
           timeout \
             --signal=TERM \
             --kill-after=60s \
-            27m \
+            28m \
             node \
               --unhandled-rejections=strict \
               "$SCRIPT_FILE"
@@ -316,7 +339,7 @@ jobs:
               echo "J1 raid script completed successfully."
               ;;
             124)
-              echo "::notice::27分の外部タイムアウトに到達しました。TERM処理で状態保存を試行済みです。"
+              echo "::notice::28分の外部タイムアウトに到達しました。TERM処理で状態保存を試行済みです。"
               exit 0
               ;;
             143)
@@ -348,7 +371,7 @@ jobs:
           const path = process.env.PERSIST_STATE_PATH;
           const raw = fs.readFileSync(path, 'utf8');
           const state = JSON.parse(raw);
-          if (state.schema !== 1 || state.version !== '7.8') {
+          if (state.schema !== 1 || state.version !== '7.9') {
             throw new Error(`unexpected state schema/version: ${state.schema}/${state.version}`);
           }
           if (/mail_confirmation|authenticity_token|(?:^|["'])cookie["']|[?&]key=/i.test(raw)) {
@@ -372,21 +395,21 @@ jobs:
           fi
           echo "Measurement lines: $(wc -l < "$MEASURE_LOG_PATH")"
           echo "Measurement bytes: $(wc -c < "$MEASURE_LOG_PATH")"
-          echo "----- Last 120 records -----"
-          tail -n 120 "$MEASURE_LOG_PATH"
+          echo "----- Last 160 records -----"
+          tail -n 160 "$MEASURE_LOG_PATH"
 
       - name: Save cross-run raid state
         if: always()
         uses: actions/cache/save@v4
         with:
           path: .raid-state/raid_state.json
-          key: raid-state-v7-8-${{ github.run_id }}-${{ github.run_attempt }}
+          key: raid-state-v7-9-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload raid measurements
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: raid-measurements-v7-8-${{ github.run_id }}
+          name: raid-measurements-v7-9-${{ github.run_id }}
           path: raid_measurements.jsonl
           if-no-files-found: warn
           retention-days: 14
