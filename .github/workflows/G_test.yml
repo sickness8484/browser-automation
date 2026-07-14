@@ -1,4 +1,4 @@
-name: Browser Task v8.0.7 Measurement
+name: Browser Task v8.0.8 Measurement
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: browser-task-v8-0-7-measurement
+  group: browser-task-v8-0-8-measurement
   cancel-in-progress: false
 
 env:
@@ -87,40 +87,64 @@ jobs:
           const zlib = require('node:zlib');
 
           const EXPECTED_PAYLOAD_SHA256 =
-            '0d54b73aa515bd5b782ab7c3ed0e2473cce80adfde1e5013ca99a48a0dcb6ab8';
+            'bb4d52da16698cb701b6c4af43118147b1c4bc361def6003210f5bd9cd2f0616';
           const EXPECTED_SOURCE_SHA256 =
-            '26d2f8b2c94cf48e978465378b2997f6e1a6a2c3a9aa585aaa45fe79fb417331';
+            'eb48ab3e40d8c41451c27586c3fca19133852580960c37bd3e82b2124ff91e6c';
 
           const wrapper = fs.readFileSync('task.js', 'utf8');
           const payloadBlock = wrapper.match(
             /const\s+PAYLOAD\s*=\s*\[([\s\S]*?)\]\.join\(\s*['"]{2}\s*\)/,
           )?.[1];
           const payload = payloadBlock
-            ? [...payloadBlock.matchAll(/['"]([A-Za-z0-9+/=]+)['"]/g)].map(match => match[1]).join('')
+            ? [...payloadBlock.matchAll(/['"]([A-Za-z0-9+/=]+)['"]/g)]
+                .map(match => match[1])
+                .join('')
             : null;
 
           if (!payload) throw new Error('Payload was not found.');
 
           const compressed = Buffer.from(payload, 'base64');
-          const digest = crypto.createHash('sha256').update(compressed).digest('hex');
-          if (digest !== EXPECTED_PAYLOAD_SHA256) throw new Error('Payload version mismatch.');
+          const digest = crypto
+            .createHash('sha256')
+            .update(compressed)
+            .digest('hex');
 
-          const source = zlib.brotliDecompressSync(compressed).toString('utf8');
+          if (digest !== EXPECTED_PAYLOAD_SHA256) {
+            throw new Error('Payload version mismatch.');
+          }
+
+          const source = zlib
+            .brotliDecompressSync(compressed)
+            .toString('utf8');
+
           new Function(source);
-          const sourceDigest = crypto.createHash('sha256').update(source).digest('hex');
-          if (sourceDigest !== EXPECTED_SOURCE_SHA256) throw new Error('Expanded source mismatch.');
+
+          const sourceDigest = crypto
+            .createHash('sha256')
+            .update(source)
+            .digest('hex');
+
+          if (sourceDigest !== EXPECTED_SOURCE_SHA256) {
+            throw new Error('Expanded source mismatch.');
+          }
 
           const prefix = wrapper.slice(0, wrapper.indexOf('const PAYLOAD'));
           const itemCount = (prefix.match(/https:\/\//g) || []).length;
+
           if (itemCount !== 6 || /DUMMY/i.test(prefix)) {
             throw new Error('Configuration items are incomplete.');
           }
 
-          if (/\breturn[A-Za-z_$][A-Za-z0-9_$]*&&/.test(source) || source.includes('returnN&&')) {
+          if (
+            /\breturn[A-Za-z_$][A-Za-z0-9_$]*&&/.test(source) ||
+            source.includes('returnN&&')
+          ) {
             throw new Error('Unsafe compacted return statement was detected.');
           }
 
-          console.log(`Payload validation passed. innerBytes=${Buffer.byteLength(source)}`);
+          console.log(
+            `Payload validation passed. innerBytes=${Buffer.byteLength(source)}`,
+          );
           NODE
 
           if ! SELF_TEST_OUTPUT="$(SELF_TEST=1 node "$TASK_FILE" 2>&1)"; then
@@ -139,6 +163,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           : > task_output.log
           : > task_metrics.jsonl
           rm -rf task_snapshots
@@ -197,70 +222,156 @@ jobs:
           const manifestPath = path.join(snapshotDir, 'manifest.jsonl');
 
           const metricRows = fs.existsSync(metricsPath)
-            ? fs.readFileSync(metricsPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line, index) => {
-                try { return JSON.parse(line); }
-                catch { throw new Error(`Invalid metric JSON at line ${index + 1}`); }
-              })
+            ? fs
+                .readFileSync(metricsPath, 'utf8')
+                .split(/\r?\n/)
+                .filter(Boolean)
+                .map((line, index) => {
+                  try {
+                    return JSON.parse(line);
+                  } catch {
+                    throw new Error(
+                      `Invalid metric JSON at line ${index + 1}`,
+                    );
+                  }
+                })
             : [];
 
           for (const row of metricRows) {
-            if (row.version !== '8.0.7-measurement') {
+            if (row.version !== '8.0.8-measurement') {
               throw new Error(`Unexpected metric version: ${row.version}`);
             }
           }
 
           const manifestRows = fs.existsSync(manifestPath)
-            ? fs.readFileSync(manifestPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line, index) => {
-                try { return JSON.parse(line); }
-                catch { throw new Error(`Invalid manifest JSON at line ${index + 1}`); }
-              })
+            ? fs
+                .readFileSync(manifestPath, 'utf8')
+                .split(/\r?\n/)
+                .filter(Boolean)
+                .map((line, index) => {
+                  try {
+                    return JSON.parse(line);
+                  } catch {
+                    throw new Error(
+                      `Invalid manifest JSON at line ${index + 1}`,
+                    );
+                  }
+                })
             : [];
 
           const htmlFiles = fs.existsSync(snapshotDir)
-            ? fs.readdirSync(snapshotDir).filter(name => name.endsWith('.html')).sort()
+            ? fs
+                .readdirSync(snapshotDir)
+                .filter(name => name.endsWith('.html'))
+                .sort()
             : [];
 
-          if (htmlFiles.length > 42) throw new Error(`Snapshot count exceeds cap: ${htmlFiles.length}`);
+          if (htmlFiles.length > 42) {
+            throw new Error(
+              `Snapshot count exceeds cap: ${htmlFiles.length}`,
+            );
+          }
+
           if (manifestRows.length !== htmlFiles.length) {
-            throw new Error(`Manifest/file count mismatch: ${manifestRows.length}/${htmlFiles.length}`);
+            throw new Error(
+              `Manifest/file count mismatch: ${manifestRows.length}/${htmlFiles.length}`,
+            );
           }
 
           const unsafeChecks = [
-            ['auth-query', /\/account\/mail_confirmation\?(?!\[REDACTED\])/i],
-            ['sensitive-query', /[?&](?:e|key|c|ccode|tpid|pid|uid|authenticity_token|csrf_token|profile_id|account_id|user_id|session_id)=/i],
-            ['email', /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i],
-            ['header', /\b(?:Cookie|Set-Cookie|Authorization)\s*:/i],
-            ['browser-storage', /\b(?:localStorage|sessionStorage)\b/i],
-            ['numeric-id-path', /\/(?:profiles?|users?|accounts?|avatars?)\/\d+/i],
+            [
+              'auth-query',
+              /\/account\/mail_confirmation\?(?!\[REDACTED\])/i,
+            ],
+            [
+              'sensitive-query',
+              /[?&](?:e|key|c|ccode|tpid|pid|uid|authenticity_token|csrf_token|profile_id|account_id|user_id|session_id)=/i,
+            ],
+            [
+              'email',
+              /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+            ],
+            [
+              'header',
+              /\b(?:Cookie|Set-Cookie|Authorization)\s*:/i,
+            ],
+            [
+              'browser-storage',
+              /\b(?:localStorage|sessionStorage)\b/i,
+            ],
+            [
+              'profile-detail-id',
+              /\/profile\/detail\/(?!\[REDACTED_PROFILE_ID\])[^/?#"'<\s]+/i,
+            ],
+            [
+              'numeric-id-path',
+              /\/(?:profiles?|users?|accounts?|avatars?)\/\d+/i,
+            ],
           ];
 
           const seen = new Set();
+
           for (const row of manifestRows) {
-            if (row.version !== '8.0.7-measurement' || row.sensitiveDataRemoved !== true) {
-              throw new Error(`Invalid manifest metadata: ${row.filename}`);
+            if (
+              row.version !== '8.0.8-measurement' ||
+              row.sensitiveDataRemoved !== true
+            ) {
+              throw new Error(
+                `Invalid manifest metadata: ${row.filename}`,
+              );
             }
-            if (path.basename(row.filename) !== row.filename || seen.has(row.filename)) {
-              throw new Error(`Invalid or duplicate snapshot filename: ${row.filename}`);
+
+            if (
+              path.basename(row.filename) !== row.filename ||
+              seen.has(row.filename)
+            ) {
+              throw new Error(
+                `Invalid or duplicate snapshot filename: ${row.filename}`,
+              );
             }
+
             seen.add(row.filename);
+
             const filePath = path.join(snapshotDir, row.filename);
-            if (!fs.existsSync(filePath)) throw new Error(`Snapshot missing: ${row.filename}`);
-            const data = fs.readFileSync(filePath);
-            const digest = crypto.createHash('sha256').update(data).digest('hex');
-            if (digest !== row.sha256 || data.length !== row.bytes) {
-              throw new Error(`Snapshot integrity mismatch: ${row.filename}`);
+
+            if (!fs.existsSync(filePath)) {
+              throw new Error(`Snapshot missing: ${row.filename}`);
             }
+
+            const data = fs.readFileSync(filePath);
+            const digest = crypto
+              .createHash('sha256')
+              .update(data)
+              .digest('hex');
+
+            if (digest !== row.sha256 || data.length !== row.bytes) {
+              throw new Error(
+                `Snapshot integrity mismatch: ${row.filename}`,
+              );
+            }
+
             const html = data.toString('utf8');
-            const issue = unsafeChecks.find(([, pattern]) => pattern.test(html));
-            if (issue) throw new Error(`Snapshot rejected (${issue[0]}): ${row.filename}`);
+            const issue = unsafeChecks.find(([, pattern]) =>
+              pattern.test(html),
+            );
+
+            if (issue) {
+              throw new Error(
+                `Snapshot rejected (${issue[0]}): ${row.filename}`,
+              );
+            }
           }
 
-          console.log(JSON.stringify({
-            metricRows: metricRows.length,
-            snapshots: htmlFiles.length,
-            manifestRows: manifestRows.length,
-            eventTypes: new Set(metricRows.map(row => row.event)).size,
-          }));
+          console.log(
+            JSON.stringify({
+              metricRows: metricRows.length,
+              snapshots: htmlFiles.length,
+              manifestRows: manifestRows.length,
+              eventTypes: new Set(
+                metricRows.map(row => row.event),
+              ).size,
+            }),
+          );
           NODE
 
       - name: Write summary
@@ -275,16 +386,24 @@ jobs:
           metric_lines=0
           metric_bytes=0
           snapshot_count=0
+
           if [ -s task_metrics.jsonl ]; then
             metric_lines="$(wc -l < task_metrics.jsonl)"
             metric_bytes="$(wc -c < task_metrics.jsonl)"
           fi
+
           if [ -d task_snapshots ]; then
-            snapshot_count="$(find task_snapshots -maxdepth 1 -type f -name '*.html' | wc -l)"
+            snapshot_count="$(
+              find task_snapshots \
+                -maxdepth 1 \
+                -type f \
+                -name '*.html' |
+              wc -l
+            )"
           fi
 
           {
-            echo "## Browser Task v8.0.7 Measurement"
+            echo "## Browser Task v8.0.8 Measurement"
             echo
             echo "- Outcome: ${TASK_OUTCOME:-unknown}"
             echo "- Exit code: ${TASK_CODE:-unknown}"
@@ -299,7 +418,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          for file in task_output.log task_metrics.jsonl task_snapshots/manifest.jsonl; do
+          for file in \
+            task_output.log \
+            task_metrics.jsonl \
+            task_snapshots/manifest.jsonl
+          do
             if [ -s "$file" ]; then
               lines="$(wc -l < "$file")"
               bytes="$(wc -c < "$file")"
@@ -310,9 +433,17 @@ jobs:
           done
 
           snapshot_count=0
+
           if [ -d task_snapshots ]; then
-            snapshot_count="$(find task_snapshots -maxdepth 1 -type f -name '*.html' | wc -l)"
+            snapshot_count="$(
+              find task_snapshots \
+                -maxdepth 1 \
+                -type f \
+                -name '*.html' |
+              wc -l
+            )"
           fi
+
           echo "task_snapshots: html_files=$snapshot_count"
 
       - name: Upload output
