@@ -1,4 +1,4 @@
-name: Browser Task v8.0.5 r2
+name: Browser Task v8.0.5 r3
 
 on:
   workflow_dispatch:
@@ -58,8 +58,7 @@ jobs:
       - name: Prepare task
         shell: bash
         env:
-          TASK_SOURCE: ${{ secrets.TASK_PAYLOAD }}
-          OUTPUT_KEY: ${{ secrets.TASK_OUTPUT_KEY }}
+          TASK_SOURCE: ${{ secrets.G1_RAID_JS }}
         run: |
           set -euo pipefail
 
@@ -67,11 +66,6 @@ jobs:
 
           if [ -z "${TASK_SOURCE:-}" ]; then
             echo "::error::Required configuration is missing."
-            exit 1
-          fi
-
-          if [ "${#OUTPUT_KEY}" -lt 16 ]; then
-            echo "::error::Output protection configuration is missing or too short."
             exit 1
           fi
 
@@ -172,25 +166,17 @@ jobs:
           set -euo pipefail
 
           {
-            echo "## Browser Task v8.0.5 r2"
+            echo "## Browser Task v8.0.5 r3"
             echo
             echo "- Outcome: ${TASK_OUTCOME:-unknown}"
             echo "- Exit code: ${TASK_CODE:-unknown}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Protect output
+      - name: Package output
         if: always()
         shell: bash
-        env:
-          OUTPUT_KEY: ${{ secrets.TASK_OUTPUT_KEY }}
         run: |
           set -euo pipefail
-
-          if [ "${#OUTPUT_KEY}" -lt 16 ]; then
-            echo "::error::Output protection configuration is missing or too short."
-            rm -f task_output.log task_metrics.jsonl
-            exit 1
-          fi
 
           files=()
 
@@ -206,29 +192,13 @@ jobs:
           fi
 
           tar -czf task_output.tar.gz "${files[@]}"
-
-          openssl enc \
-            -aes-256-cbc \
-            -salt \
-            -pbkdf2 \
-            -iter 200000 \
-            -in task_output.tar.gz \
-            -out task_output.bin \
-            -pass env:OUTPUT_KEY
-
-          rm -f \
-            task_output.log \
-            task_metrics.jsonl \
-            task_status.txt \
-            task_output.tar.gz
-
-          echo "Protected output prepared."
+          echo "Output package prepared."
 
       - name: Upload output
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: task-output-${{ github.run_id }}-${{ github.run_attempt }}
-          path: task_output.bin
+          path: task_output.tar.gz
           if-no-files-found: warn
           retention-days: 7
