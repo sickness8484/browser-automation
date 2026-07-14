@@ -1,26 +1,464 @@
-name: Daily Test
+name: DragonCraze Golden Rescue v8.0.2
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: dragoncraze-golden-rescue-v8-0-2
+  cancel-in-progress: false
+
+env:
+  NODE_ENV: production
+  NODE_OPTIONS: --max-old-space-size=2048
+
+  # Secret内のAUTH_URLSは6件。
+  # 1 Chromium + 6 BrowserContextで実効最大並列。
+  CONCURRENCY: 6
+  CYCLES: 999
+
+  # 本体の実行予算は26分。
+  # 外側のtimeoutは28分として終了処理の猶予を確保する。
+  RUN_BUDGET_MS: 1560000
+
+  WAIT_AFTER_SELF_MIN_SEC: 60
+  WAIT_AFTER_SELF_MAX_SEC: 120
+  WAIT_BETWEEN_CYCLES_MIN_SEC: 5
+  WAIT_BETWEEN_CYCLES_MAX_SEC: 15
+
+  ACCOUNT_START_JITTER_MIN_MS: 400
+  ACCOUNT_START_JITTER_MAX_MS: 3500
+
+  PROCEED_MIN_GAP_MS: 2000
+  PROCEED_JITTER_MIN_MS: 80
+  PROCEED_JITTER_MAX_MS: 300
+  PROCEED_RESULT_WAIT_MIN_MS: 2200
+  PROCEED_RESULT_WAIT_MAX_MS: 2600
+
+  MAX_QUEST_ADVANCE: 15
+  MAX_RESCUE_HITS: 30
+  MAX_SAME_QUEST_STATE: 3
+
+  ACTION_TIMEOUT_MS: 10000
+  SELECTOR_TIMEOUT_MS: 2500
+  NAV_TIMEOUT_MS: 30000
+  TRANSITION_TIMEOUT_MS: 5000
+  GOTO_RETRIES: 2
+
+  STRICT_EXIT_GOLDEN: 'true'
+  DRY_RUN: 'false'
+  LOG_LEVEL: info
+
+  MEASURE_ENABLED: 'true'
+  MEASURE_LOG_PATH: ${{ github.workspace }}/golden_raid_measurements.jsonl
+
 jobs:
-  run-script:
+  golden-rescue:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          node-version: '20'
+          persist-credentials: false
 
-      - run: npm init -y && npm install playwright
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
 
-      - run: npx playwright install --with-deps
-
-      - env:
-          G1_RAID_JS: ${{ secrets.G1_RAID_JS }}
+      - name: Show runtime versions
+        shell: bash
         run: |
-          printf '%s\n' "$G1_RAID_JS" > g1_raid.js
-          node g1_raid.js
+          set -euo pipefail
+
+          node --version
+          npm --version
+
+      - name: Install Playwright Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f package.json ]; then
+            npm init -y >/dev/null 2>&1
+          fi
+
+          npm install \
+            --no-save \
+            --no-audit \
+            --no-fund \
+            playwright
+
+          npx playwright install --with-deps chromium
+
+      - name: Create and validate golden raid script
+        shell: bash
+        env:
+          GOLDEN_SCRIPT_SOURCE: ${{ secrets.G1_RAID_JS }}
+        run: |
+          set -euo pipefail
+
+          SCRIPT_FILE="golden_raid.js"
+
+          if [ -z "${GOLDEN_SCRIPT_SOURCE:-}" ]; then
+            echo "::error::Secret G1_RAID_JS が未設定、または空です。"
+            exit 1
+          fi
+
+          printf '%s' "$GOLDEN_SCRIPT_SOURCE" > "$SCRIPT_FILE"
+
+          FILE_SIZE="$(wc -c < "$SCRIPT_FILE")"
+
+          echo "Script created: $SCRIPT_FILE"
+          echo "Script size   : $FILE_SIZE bytes"
+          echo "Secret name   : G1_RAID_JS"
+
+          if [ "$FILE_SIZE" -lt 5000 ]; then
+            echo "::error::JSが小さすぎます。Secretへの貼り付け切れが疑われます。"
+            exit 1
+          fi
+
+          if [ "$FILE_SIZE" -ge 49152 ]; then
+            echo "::error::JSがGitHub Secretの48 KiB上限以上です。"
+            exit 1
+          fi
+
+          node --check "$SCRIPT_FILE"
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const zlib = require('node:zlib');
+
+          const wrapper = fs.readFileSync('golden_raid.js', 'utf8');
+
+          const authBlock = wrapper.match(
+            /const\s+AUTH_URLS\s*=\s*\[([\s\S]*?)\];/
+          );
+
+          if (!authBlock) {
+            throw new Error('先頭のAUTH_URLS配列を検出できません');
+          }
+
+          const urls = [
+            ...authBlock[1].matchAll(/'([^']+)'/g),
+          ].map(match => match[1]);
+
+          if (urls.length !== 6) {
+            throw new Error(
+              `AUTH_URLSは6件必要です。現在${urls.length}件です`
+            );
+          }
+
+          if (new Set(urls).size !== urls.length) {
+            throw new Error('AUTH_URLSに重複があります');
+          }
+
+          for (const value of urls) {
+            const url = new URL(value);
+
+            if (
+              url.protocol !== 'https:' ||
+              url.hostname !== 'dragoncraze.com' ||
+              url.pathname !== '/account/mail_confirmation'
+            ) {
+              throw new Error(
+                'AUTH_URLSに想定外のURLがあります'
+              );
+            }
+
+            if (
+              !url.searchParams.get('e') ||
+              !url.searchParams.get('key')
+            ) {
+              throw new Error(
+                'AUTH_URLSのURLにeまたはkeyがありません'
+              );
+            }
+
+            if (/DUMMY/i.test(value)) {
+              throw new Error(
+                'AUTH_URLSに未置換のDUMMY URLがあります'
+              );
+            }
+          }
+
+          if (
+            !wrapper.includes(
+              'globalThis.__AUTH_URLS__=AUTH_URLS'
+            )
+          ) {
+            throw new Error(
+              'AUTH_URLSのglobalThis受け渡しがありません'
+            );
+          }
+
+          if (
+            !wrapper.includes(
+              "process.env.AUTH_URLS_TEXT=AUTH_URLS.join('\\n')"
+            )
+          ) {
+            throw new Error(
+              'AUTH_URLS_TEXTの互換ブリッジがありません'
+            );
+          }
+
+          const payload = wrapper.match(
+            /const\s+PAYLOAD='([^']+)'/s
+          )?.[1];
+
+          if (!payload) {
+            throw new Error(
+              '圧縮PAYLOADを検出できません'
+            );
+          }
+
+          const inner = zlib
+            .brotliDecompressSync(
+              Buffer.from(payload, 'base64')
+            )
+            .toString('utf8');
+
+          new Function(inner);
+
+          const required = [
+            'SELF_TEST_OK_GOLDEN_V8_0_2',
+            'spawned_golden_left',
+            'own_existing_skipped',
+            'chooseRescueAction',
+            'rescue ${plan.action} attack',
+            'rescue BP0 still uses first-free',
+            'rescue BP19 still uses first-free',
+            'rescue missing BP still uses first-free',
+            'idle page policy',
+            'globalThis.__AUTH_URLS__',
+          ];
+
+          for (const marker of required) {
+            if (!inner.includes(marker)) {
+              throw new Error(
+                `必須マーカー欠落: ${marker}`
+              );
+            }
+          }
+
+          if (
+            /mag_type[^\n]{0,80}3times/i.test(inner)
+          ) {
+            throw new Error(
+              '禁止された全力攻撃パラメータを検出しました'
+            );
+          }
+
+          if (
+            /locator\([^\n]{0,120}全力攻撃|has-text\([^\n]{0,80}全力攻撃/i
+              .test(inner)
+          ) {
+            throw new Error(
+              '禁止された全力攻撃操作を検出しました'
+            );
+          }
+
+          if (
+            /const hasFirst\s*=\s*bp\s*&&\s*bp\.current\s*>=\s*20/
+              .test(inner)
+          ) {
+            throw new Error(
+              '初回無料フォームがBP条件で遮断される旧実装です'
+            );
+          }
+
+          const chooserStart = inner.indexOf(
+            'function chooseRescueAction'
+          );
+
+          const chooserEnd = inner.indexOf(
+            'async function attackRescue',
+            chooserStart
+          );
+
+          if (chooserStart < 0 || chooserEnd < 0) {
+            throw new Error(
+              '救援攻撃判定関数を正しく検出できません'
+            );
+          }
+
+          const chooser = inner.slice(
+            chooserStart,
+            chooserEnd
+          );
+
+          const firstIndex = chooser.indexOf(
+            'if (hasFirst)'
+          );
+
+          const bpIndex = chooser.indexOf(
+            'Number.isFinite(bpCurrent)'
+          );
+
+          if (
+            firstIndex < 0 ||
+            bpIndex < 0 ||
+            firstIndex >= bpIndex
+          ) {
+            throw new Error(
+              '初回無料攻撃がBP判定より先に評価されていません'
+            );
+          }
+
+          if (
+            /\breturn[A-Za-z_$][A-Za-z0-9_$]*&&/
+              .test(inner)
+          ) {
+            throw new Error(
+              'return文と識別子が結合した危険なコードです'
+            );
+          }
+
+          if (
+            !/金レイド検出[^\n]+攻撃せず[^\n]+救援依頼せず/
+              .test(inner)
+          ) {
+            throw new Error(
+              '金レイド完全放置方針を確認できません'
+            );
+          }
+
+          console.log(
+            `Embedded auth validation passed. accounts=${urls.length}`
+          );
+
+          console.log(
+            `Expanded source syntax/policy check passed. bytes=${Buffer.byteLength(inner)}`
+          );
+          NODE
+
+          SELF_TEST=1 \
+          ALLOW_DUMMY_AUTH=1 \
+          node "$SCRIPT_FILE"
+
+      - name: Run DragonCraze Golden Rescue v8.0.2
+        id: run-golden
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          echo "========================================"
+          echo "DragonCraze Golden Rescue v8.0.2"
+          echo "Node               : $(node --version)"
+          echo "Secret             : G1_RAID_JS"
+          echo "Account concurrency: ${CONCURRENCY}"
+          echo "Auth source         : embedded AUTH_URLS in G1_RAID_JS"
+          echo "Own golden policy   : no attack / no SOS"
+          echo "Rescue policy       : first-free always; normal only when BP>=20"
+          echo "Internal budget     : 26 minutes"
+          echo "External limit      : 28 minutes"
+          echo "Idle page policy    : phase pages closed during waits"
+          echo "Started at          : $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "========================================"
+
+          timeout \
+            --signal=TERM \
+            --kill-after=60s \
+            28m \
+            node golden_raid.js
+
+          CODE=$?
+
+          echo "========================================"
+          echo "Finished at : $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "Exit code   : $CODE"
+          echo "========================================"
+
+          if [ "$CODE" -ne 0 ]; then
+            echo "::error::スクリプトがエラー終了しました。終了コード: $CODE"
+          fi
+
+          exit "$CODE"
+
+      - name: Write run summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const file = process.env.MEASURE_LOG_PATH;
+
+          if (!file || !fs.existsSync(file)) {
+            fs.appendFileSync(
+              process.env.GITHUB_STEP_SUMMARY,
+              [
+                '## Golden Rescue v8.0.2',
+                '',
+                '計測ファイルは生成されませんでした。',
+                '',
+              ].join('\n')
+            );
+
+            process.exit(0);
+          }
+
+          const raw = fs
+            .readFileSync(file, 'utf8')
+            .trim();
+
+          const rows = raw
+            ? raw
+                .split(/\n+/)
+                .filter(Boolean)
+                .map(line => {
+                  try {
+                    return JSON.parse(line);
+                  } catch {
+                    return null;
+                  }
+                })
+                .filter(Boolean)
+            : [];
+
+          const summary = [...rows]
+            .reverse()
+            .find(row => row.event === 'run_summary');
+
+          const health = [...rows]
+            .reverse()
+            .find(row => row.event === 'run_health');
+
+          let md = '## Golden Rescue v8.0.2\n\n';
+
+          if (!summary) {
+            md += 'run_summaryが見つかりませんでした。\n';
+          } else {
+            md += `- Health: **${health?.status || 'unknown'}**\n`;
+            md += `- Authenticated: ${summary.authenticatedAccounts}\n`;
+            md += `- Loops: ${summary.loops}\n`;
+            md += `- Golden left untouched: ${summary.spawnedGoldenLeft}\n`;
+            md += `- Existing own raids skipped: ${summary.ownExistingSkipped}\n`;
+            md += `- Non-golden spawned: ${summary.spawnedNonGolden}\n`;
+            md += `- Own free attacks / SOS: ${summary.ownFreeAttacks} / ${summary.helpRequests}\n`;
+            md += `- Rescue joins / hits: ${summary.rescueJoins} / ${summary.rescueHits}\n`;
+            md += `- Rescue free / normal: ${summary.rescueFreeAttacks} / ${summary.rescueNormalAttacks}\n`;
+            md += `- Pages opened / closed: ${summary.pagesOpened} / ${summary.pagesClosed}\n`;
+            md += `- Phase errors: ${summary.phaseErrors}\n`;
+          }
+
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            md
+          );
+          NODE
+
+      - name: Upload measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-rescue-v8-0-2-measurements-${{ github.run_id }}-${{ github.run_attempt }}
+          path: golden_raid_measurements.jsonl
+          if-no-files-found: warn
+          retention-days: 7
