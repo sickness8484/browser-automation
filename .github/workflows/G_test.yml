@@ -1,4 +1,4 @@
-name: Browser Task v8.0.9
+name: Browser Task B
 
 on:
   workflow_dispatch:
@@ -7,394 +7,50 @@ permissions:
   contents: read
 
 concurrency:
-  group: browser-task-v8-0-9
+  group: browser-task-b
   cancel-in-progress: false
-
-env:
-  NODE_ENV: production
-  NODE_OPTIONS: --max-old-space-size=2048
-  MEASURE_VERBOSE: 'false'
-  SNAPSHOT_MODE: errors
-  PERSIST_STATE_ENABLED: 'true'
-  PERSIST_STATE_PATH: ${{ github.workspace }}/.task-state/state.json
 
 jobs:
   execute:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-
+    timeout-minutes: 30
     steps:
-      - name: Restore task state
-        id: state-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: .task-state/state.json
-          key: task-state-v8-0-9-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            task-state-v8-0-9-
-
-      - name: Setup runtime
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
 
-      - name: Install package
-        id: package
+      - name: Set up runtime
         shell: bash
         run: |
-          set -euo pipefail
-
           npm init -y >/dev/null 2>&1
-          npm install \
-            --no-save \
-            --no-audit \
-            --no-fund \
-            playwright
-
-          VERSION="$(node -p 'require("playwright/package.json").version')"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Cache runtime
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-runtime-${{ steps.package.outputs.version }}-chromium
-
-      - name: Install runtime
-        shell: bash
-        run: |
-          set -euo pipefail
+          npm install --no-save playwright
           npx playwright install --with-deps chromium
 
-      - name: Prepare task
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: .task-state
+          key: task-b-${{ github.ref_name }}
+          restore-keys: |
+            task-b-
+
+      - name: Prepare bundle
         shell: bash
         env:
-          TASK_SOURCE: ${{ secrets.G1_RAID_JS }}
+          BUNDLE: ${{ secrets.G1_RAID_JS }}
         run: |
-          set -euo pipefail
+          test -n "$BUNDLE"
+          printf '%s' "$BUNDLE" > task.js
+          node --check task.js
+          CHECK_ONLY=1 node task.js > check.log
+          grep -q 'SELF_TEST_OK_' check.log
+          rm -f check.log
 
-          TASK_FILE="task.js"
-
-          if [ -z "${TASK_SOURCE:-}" ]; then
-            echo "::error::Required configuration is missing."
-            exit 1
-          fi
-
-          printf '%s' "$TASK_SOURCE" > "$TASK_FILE"
-
-          FILE_SIZE="$(wc -c < "$TASK_FILE")"
-          echo "Task prepared. bytes=$FILE_SIZE"
-
-          if [ "$FILE_SIZE" -lt 5000 ] || [ "$FILE_SIZE" -ge 49152 ]; then
-            echo "::error::Configuration size is outside the allowed range."
-            exit 1
-          fi
-
-          node --check "$TASK_FILE"
-
-          node <<'NODE'
-          'use strict';
-
-          const crypto = require('node:crypto');
-          const fs = require('node:fs');
-          const zlib = require('node:zlib');
-
-          const EXPECTED_PAYLOAD_SHA256 =
-            '90e6c9687fbdada8da6ef07d32999e6f139be7f42357fd7b14063c312c9e5366';
-          const EXPECTED_SOURCE_SHA256 =
-            '25d97689442429efe8c4579df01b7bfe833da8addda756b519c07fb0e5e375d3';
-
-          const wrapper = fs.readFileSync('task.js', 'utf8');
-          const payloadBlock = wrapper.match(
-            /const\s+PAYLOAD\s*=\s*\[([\s\S]*?)\]\.join\(\s*['"]{2}\s*\)/,
-          )?.[1];
-          const payload = payloadBlock
-            ? [...payloadBlock.matchAll(/['"]([A-Za-z0-9+/=]+)['"]/g)].map(match => match[1]).join('')
-            : null;
-
-          if (!payload) throw new Error('Payload was not found.');
-
-          const compressed = Buffer.from(payload, 'base64');
-          const digest = crypto.createHash('sha256').update(compressed).digest('hex');
-          if (digest !== EXPECTED_PAYLOAD_SHA256) throw new Error('Payload version mismatch.');
-
-          const source = zlib.brotliDecompressSync(compressed).toString('utf8');
-          new Function(source);
-          const sourceDigest = crypto.createHash('sha256').update(source).digest('hex');
-          if (sourceDigest !== EXPECTED_SOURCE_SHA256) throw new Error('Expanded source mismatch.');
-
-          const prefix = wrapper.slice(0, wrapper.indexOf('const PAYLOAD'));
-          const itemCount = (prefix.match(/https:\/\//g) || []).length;
-          if (itemCount !== 6 || /DUMMY/i.test(prefix)) {
-            throw new Error('Configuration items are incomplete.');
-          }
-
-          if (/\breturn[A-Za-z_$][A-Za-z0-9_$]*&&/.test(source) || source.includes('returnN&&')) {
-            throw new Error('Unsafe compacted return statement was detected.');
-          }
-
-          const required = [
-            "VERSION: '8.0.9-practical-analysis'",
-            'SELF_TEST_OK_G1_V8_0_9',
-            'weakMatchCount',
-            'ready-page history is never attributed',
-            'persistent_state_saved',
-          ];
-          for (const marker of required) {
-            if (!source.includes(marker)) throw new Error(`Required marker is missing: ${marker}`);
-          }
-
-          console.log(`Payload validation passed. innerBytes=${Buffer.byteLength(source)}`);
-          NODE
-
-          if ! SELF_TEST_OUTPUT="$(SELF_TEST=1 node "$TASK_FILE" 2>&1)"; then
-            echo "::error::Task self-test failed."
-            exit 1
-          fi
-
-          if ! grep -q 'SELF_TEST_OK_G1_V8_0_9' <<< "$SELF_TEST_OUTPUT"; then
-            echo "::error::Task self-test marker is missing."
-            exit 1
-          fi
-
-          echo "Task self-test passed."
-
-      - name: Initialize output
-        shell: bash
-        run: |
-          set -euo pipefail
-          : > task_output.log
-          : > task_metrics.jsonl
-          rm -rf task_snapshots
-          mkdir -p task_snapshots
-
-      - name: Execute task
-        id: execute-task
-        shell: bash
-        run: |
-          set -uo pipefail
-
-          echo "Task started at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-
-          timeout \
-            --signal=TERM \
-            --kill-after=60s \
-            28m \
-            node --unhandled-rejections=strict task.js \
-            > task_output.log \
-            2>&1
-
-          CODE=$?
-          echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          echo "Task finished at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          echo "Exit code: $CODE"
-
-          case "$CODE" in
-            0)
-              exit 0
-              ;;
-            124|143)
-              echo "::notice::The external stop limit was reached after output collection."
-              exit 0
-              ;;
-            *)
-              echo "::error::Task execution failed. See the output artifact."
-              exit "$CODE"
-              ;;
-          esac
-
-      - name: Validate collected output
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          node <<'NODE'
-          'use strict';
-
-          const crypto = require('node:crypto');
-          const fs = require('node:fs');
-          const path = require('node:path');
-
-          const metricsPath = 'task_metrics.jsonl';
-          const snapshotDir = 'task_snapshots';
-          const manifestPath = path.join(snapshotDir, 'manifest.jsonl');
-
-          const metricRows = fs.existsSync(metricsPath)
-            ? fs.readFileSync(metricsPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line, index) => {
-                try { return JSON.parse(line); }
-                catch { throw new Error(`Invalid metric JSON at line ${index + 1}`); }
-              })
-            : [];
-
-          for (const row of metricRows) {
-            if (row.version !== '8.0.9-practical-analysis') {
-              throw new Error(`Unexpected metric version: ${row.version}`);
-            }
-          }
-
-          const manifestRows = fs.existsSync(manifestPath)
-            ? fs.readFileSync(manifestPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line, index) => {
-                try { return JSON.parse(line); }
-                catch { throw new Error(`Invalid manifest JSON at line ${index + 1}`); }
-              })
-            : [];
-
-          const htmlFiles = fs.existsSync(snapshotDir)
-            ? fs.readdirSync(snapshotDir).filter(name => name.endsWith('.html')).sort()
-            : [];
-
-          if (htmlFiles.length > 18) throw new Error(`Snapshot count exceeds cap: ${htmlFiles.length}`);
-          if (manifestRows.length !== htmlFiles.length) {
-            throw new Error(`Manifest/file count mismatch: ${manifestRows.length}/${htmlFiles.length}`);
-          }
-
-          const unsafeChecks = [
-            ['auth-query', /\/account\/mail_confirmation\?(?!\[REDACTED\])/i],
-            ['sensitive-query', /[?&](?:e|key|c|ccode|tpid|pid|uid|authenticity_token|csrf_token|profile_id|account_id|user_id|session_id)=/i],
-            ['email', /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i],
-            ['header', /\b(?:Cookie|Set-Cookie|Authorization)\s*:/i],
-            ['browser-storage', /\b(?:localStorage|sessionStorage)\b/i],
-            ['profile-detail-id', /\/profile\/detail\/(?!\[REDACTED_PROFILE_ID\])[^/?#"'<\s]+/i],
-            ['numeric-id-path', /\/(?:profiles?|users?|accounts?|avatars?)\/\d+/i],
-          ];
-
-          const seen = new Set();
-          for (const row of manifestRows) {
-            if (row.version !== '8.0.9-practical-analysis' || row.sensitiveDataRemoved !== true) {
-              throw new Error(`Invalid manifest metadata: ${row.filename}`);
-            }
-            if (path.basename(row.filename) !== row.filename || seen.has(row.filename)) {
-              throw new Error(`Invalid or duplicate snapshot filename: ${row.filename}`);
-            }
-            seen.add(row.filename);
-            const filePath = path.join(snapshotDir, row.filename);
-            if (!fs.existsSync(filePath)) throw new Error(`Snapshot missing: ${row.filename}`);
-            const data = fs.readFileSync(filePath);
-            const digest = crypto.createHash('sha256').update(data).digest('hex');
-            if (digest !== row.sha256 || data.length !== row.bytes) {
-              throw new Error(`Snapshot integrity mismatch: ${row.filename}`);
-            }
-            const html = data.toString('utf8');
-            const issue = unsafeChecks.find(([, pattern]) => pattern.test(html));
-            if (issue) throw new Error(`Snapshot rejected (${issue[0]}): ${row.filename}`);
-          }
-
-          const statePath = process.env.PERSIST_STATE_PATH;
-          let stateOwners = 0;
-          if (statePath && fs.existsSync(statePath) && fs.statSync(statePath).size > 0) {
-            const raw = fs.readFileSync(statePath, 'utf8');
-            const unsafeState =
-              /mail_confirmation|authenticity_token|(?:^|["'])cookie["']|set-cookie|authorization/i.test(raw) ||
-              /[?&](?:e|key|c|ccode|tpid)=/i.test(raw) ||
-              /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(raw);
-            if (unsafeState) throw new Error('Unsafe material was detected in task state.');
-            const state = JSON.parse(raw);
-            if (state.schema !== 1 || state.version !== '8.0.9') {
-              throw new Error(`Unexpected task state: ${state.schema}/${state.version}`);
-            }
-            for (const [ownerHash, owner] of Object.entries(state.ownerEconomy || {})) {
-              if (!/^[0-9a-f]{24}$/.test(ownerHash)) throw new Error('Invalid owner hash in task state.');
-              for (const item of owner.recentRaids || []) {
-                if (!/^[0-9a-f]{24}$/.test(String(item.hash || ''))) {
-                  throw new Error('Invalid item hash in task state.');
-                }
-              }
-            }
-            stateOwners = Object.keys(state.ownerEconomy || {}).length;
-          }
-
-          console.log(JSON.stringify({
-            metricRows: metricRows.length,
-            snapshots: htmlFiles.length,
-            manifestRows: manifestRows.length,
-            eventTypes: new Set(metricRows.map(row => row.event)).size,
-            stateOwners,
-          }));
-          NODE
-
-      - name: Write summary
-        if: always()
+      - name: Execute bundle
         shell: bash
         env:
-          TASK_OUTCOME: ${{ steps.execute-task.outcome }}
-          TASK_CODE: ${{ steps.execute-task.outputs.code }}
+          CONCURRENCY: '6'
+          RUN_BUDGET_MS: '1560000'
         run: |
-          set -euo pipefail
-
-          metric_lines=0
-          metric_bytes=0
-          snapshot_count=0
-          if [ -s task_metrics.jsonl ]; then
-            metric_lines="$(wc -l < task_metrics.jsonl)"
-            metric_bytes="$(wc -c < task_metrics.jsonl)"
-          fi
-          if [ -d task_snapshots ]; then
-            snapshot_count="$(find task_snapshots -maxdepth 1 -type f -name '*.html' | wc -l)"
-          fi
-
-          {
-            echo "## Browser Task v8.0.9"
-            echo
-            echo "- Outcome: ${TASK_OUTCOME:-unknown}"
-            echo "- Exit code: ${TASK_CODE:-unknown}"
-            echo "- Metric rows: ${metric_lines}"
-            echo "- Metric bytes: ${metric_bytes}"
-            echo "- Sanitized snapshots: ${snapshot_count}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Inspect output
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          for file in task_output.log task_metrics.jsonl task_snapshots/manifest.jsonl; do
-            if [ -s "$file" ]; then
-              lines="$(wc -l < "$file")"
-              bytes="$(wc -c < "$file")"
-              echo "$file: lines=$lines bytes=$bytes"
-            else
-              echo "::warning::$file is missing or empty."
-            fi
-          done
-
-          snapshot_count=0
-          if [ -d task_snapshots ]; then
-            snapshot_count="$(find task_snapshots -maxdepth 1 -type f -name '*.html' | wc -l)"
-          fi
-          echo "task_snapshots: html_files=$snapshot_count"
-
-      - name: Check task state
-        id: state-check
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -s "$PERSIST_STATE_PATH" ]; then
-            echo "save=true" >> "$GITHUB_OUTPUT"
-            echo "Task state is ready."
-          else
-            echo "save=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Task state is missing or empty."
-          fi
-
-      - name: Save task state
-        if: ${{ always() && steps.state-check.outputs.save == 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: .task-state/state.json
-          key: task-state-v8-0-9-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Upload output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: task-output-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            task_output.log
-            task_metrics.jsonl
-            task_snapshots/
-          if-no-files-found: warn
-          retention-days: 7
-          compression-level: 6
+          timeout --signal=TERM --kill-after=20s 28m node task.js
