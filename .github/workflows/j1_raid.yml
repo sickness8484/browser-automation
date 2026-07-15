@@ -40,7 +40,10 @@ jobs:
         env:
           BUNDLE: ${{ secrets.J1_RAID_IS }}
         run: |
-          test -n "$BUNDLE"
+          if [ -z "${BUNDLE:-}" ]; then
+            echo "::error::Repository secret J1_RAID_IS is empty or unavailable."
+            exit 1
+          fi
           printf '%s' "$BUNDLE" > task.js
           node --check task.js
           CHECK_ONLY=1 node task.js > check.log
