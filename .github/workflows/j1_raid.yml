@@ -38,10 +38,10 @@ jobs:
       - name: Prepare bundle
         shell: bash
         env:
-          BUNDLE: ${{ secrets.J1_RAID_IS }}
+          BUNDLE: ${{ secrets.J1_RAID_JS }}
         run: |
           if [ -z "${BUNDLE:-}" ]; then
-            echo "::error::Repository secret J1_RAID_IS is empty or unavailable."
+            echo "::error::Repository secret J1_RAID_JS is empty or unavailable."
             exit 1
           fi
           printf '%s' "$BUNDLE" > task.js
