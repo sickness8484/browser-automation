@@ -1,477 +1,56 @@
-name: J1 Raid Economy v8.1
+name: Browser Task A
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: write
 
 concurrency:
-  group: j1-raid-economy
+  group: browser-task-a
   cancel-in-progress: false
 
-env:
-  NODE_ENV: production
-
-  # 6アカウントを最大6並列。同一物理レイドへの攻撃だけJS内部mutexで直列化。
-  CONCURRENCY: 6
-
-  # 30分周期のうち本体26分。外側28分で停止猶予を確保する。
-  RUN_BUDGET_MS: 1560000
-
-  # 自発が出なかった場合の空白を短縮。MAX_QUEST_ADVANCESは毎回の試行単位で適用する。
-  OWN_CHECK_INTERVAL_SEC: 45
-  QUEST_RETRY_SEC: 30
-  QUEST_CAP_RETRY_SEC: 5
-  MAX_QUEST_ADVANCES: 15
-  MAX_QUEST_ITERATIONS: 40
-  IDLE_POLL_MAX_SEC: 20
-  SUMMARY_INTERVAL_SEC: 300
-
-  # 実行間で安全な数値・状態だけを引き継ぐ。認証URL/Cookie/CSRFは保存しない。
-  PERSIST_STATE_ENABLED: 'true'
-  PERSIST_STATE_PATH: ${{ github.workspace }}/.raid-state/raid_state.json
-  PERSIST_STATE_MAX_AGE_SEC: 604800
-  PERSIST_STATE_SAVE_INTERVAL_SEC: 60
-  PERSIST_OBSERVATION_TTL_SEC: 1800
-  PERSIST_EXTERNAL_DPS_DISCOUNT_X100: 50
-  PERSIST_EXTERNAL_DPS_MIN_SAMPLES: 3
-  PERSIST_MAX_SEEN_RESCUES: 500
-
-  # 無料攻撃の状態管理。
-  FREE_VERIFY_FIRST_SEC: 30
-  FREE_RETRY_AFTER_SEC: 90
-  FREE_VERIFY_AFTER_RETRY_SEC: 30
-  FREE_MAX_SUBMISSIONS: 2
-  FREE_STATE_TTL_SEC: 7200
-
-  # 同一レイド競合・攻撃フォーム復旧。
-  RAID_ATTACK_LOCK_WAIT_WARN_MS: 1500
-  FORM_MISSING_RETRY_SEC: 120
-
-  # 有料攻撃がHP・BP・戦況のすべて不変だった場合だけ短時間で再確認。
-  # 適用確認後は同じアカウントの即時連打を避け、30秒後に再判断する。
-  PAID_NOOP_RETRY_SEC: 30
-  PAID_NOOP_MAX_RETRIES: 2
-  PAID_SUCCESS_COOLDOWN_SEC: 30
-  # 攻撃送信後にreadyも報酬も取れない場合は、通常45秒待たず5秒後に自発状態を再確認する。
-  ENDED_AFTER_ATTACK_RECHECK_SEC: 5
-
-  # 管理アカウントの攻撃を外部DPSへ混ぜない。
-  MANAGED_ACTION_SUPPRESS_SEC: 30
-  EXTERNAL_DPS_MIN_SAMPLE_SEC: 5
-  EXTERNAL_DPS_MAX_GAP_SEC: 900
-  EXTERNAL_DPS_DECISION_DISCOUNT_X100: 60
-  EXTERNAL_DPS_IDLE_HALF_LIFE_SEC: 180
-  EXTERNAL_DPS_STALE_SEC: 600
-
-  # 外部DPSが遅い管理自発へ、BPを枯らさない範囲で持続的に圧力を掛ける。
-  OWN_PRESSURE_ENABLED: 'true'
-  OWN_PRESSURE_MIN_BP: 40
-  OWN_PRESSURE_RESERVE_BP: 20
-  OWN_PRESSURE_CLEAR_SEC: 900
-  OWN_PRESSURE_MIN_INTERVAL_SEC: 600
-  OWN_PRESSURE_MAX_PER_RUN: 3
-
-  # 残り時間が少ない管理自発・管理救援を優先。
-  OWN_TIMEOUT_PRESSURE_SEC: 600
-  MANAGED_RESCUE_TIMEOUT_PRESSURE_SEC: 300
-
-  # コンボは前回攻撃から10分。
-  COMBO_WINDOW_SEC: 600
-  OWN_COMBO_MIN: 10
-  RESCUE_COMBO_MIN: 15
-  OWN_PROTECT_10_14_SEC: 480
-  OWN_PROTECT_15_29_SEC: 465
-  OWN_PROTECT_30_PLUS_SEC: 450
-  RESCUE_PROTECT_SEC: 480
-  COMBO_LOCK_MS: 45000
-  COMBO_RECHECK_FLOOR_SEC: 60
-
-  # ready画面に救援信号がある場合だけ一覧を開く。
-  RESCUE_WAVE_OFFSETS_SEC: 60,240,480
-  RESCUE_EXISTING_WAVE_OFFSETS_SEC: 30,180,420
-  RESCUE_SIGNAL_RECHECK_SEC: 30
-  RESCUE_SIGNAL_FORCE_AFTER_SEC: 600
-  MAX_RESCUE_LIST_LOADS: 4
-  # 参加失敗時だけ30秒後の回復ロードを1回追加可能。
-  RESCUE_JOIN_RETRY_SEC: 30
-  RESCUE_JOIN_MAX_RETRIES: 2
-  MAX_RESCUES_PER_WAVE: 12
-  RESCUE_CACHE_TTL_SEC: 7200
-
-  # 管理自発の討伐を最優先。実測火力は実行間で引き継ぐ。
-  BP_OVERFLOW_MARGIN: 3
-  MAX_OWN_PAID_HITS_PER_CYCLE: 5
-  MAX_EXTERNAL_RESCUE_PAID_PER_RUN: 2
-  # 自発が停滞中のアカウントは、外部救援へ有料攻撃した後も最低40BPを残す。
-  # 管理アカウント発見レイドへの支援にはこの追加予約を適用しない。
-  EXTERNAL_RESCUE_OWN_RESERVE_BP: 40
-  DEFAULT_NORMAL_DAMAGE: 500000
-  DEFAULT_FULL_RATIO_X100: 250
-  FINISH_SAFETY_X100: 120
-
-  # デッキ・計測。
-  DECK_AUTO_SWITCH: 'true'
-  DECK_SCAN_MAX: 12
-  MEASURE_ENABLED: 'true'
-  MEASURE_CONSOLE_MODE: json
-  MEASURE_LOG_PATH: ${{ github.workspace }}/raid_measurements.jsonl
-
-  # 認証0件、体系的phase error、攻撃要求多数なのにPOST 0件を失敗扱い。
-  STRICT_EXIT_V8: 'true'
-
 jobs:
-  raid-economy:
+  execute:
     runs-on: ubuntu-latest
-    timeout-minutes: 36
-
+    timeout-minutes: 30
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Restore cross-run raid state
-        id: raid-state-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: .raid-state/raid_state.json
-          key: raid-state-v8-1-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            raid-state-v8-1-
-            raid-state-v8-0-
-            raid-state-v7-9-
-            raid-state-v7-8-
-
-      - name: Inspect restored state
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .raid-state
-          STATE_FILE=".raid-state/raid_state.json"
-          if [ ! -s "$STATE_FILE" ]; then
-            echo "No previous v8.1/v8.0/v7.9/v7.8 state was restored. This is normal on the first persistent-state run."
-            exit 0
-          fi
-          node <<'NODE'
-          const fs = require('node:fs');
-          const path = '.raid-state/raid_state.json';
-          const raw = fs.readFileSync(path, 'utf8');
-          const state = JSON.parse(raw);
-          const ageSec = Math.max(0, Math.round((Date.now() - Number(state.savedAt || 0)) / 1000));
-          if (state.schema !== 1 || !state.accounts || typeof state.accounts !== 'object') {
-            throw new Error('restored state schema is invalid');
-          }
-          if (/mail_confirmation|authenticity_token|(?:^|["'])cookie["']|[?&]key=/i.test(raw)) {
-            throw new Error('sensitive material was detected in restored state');
-          }
-          console.log(`Restored state: version=${state.version || 'unknown'} accounts=${Object.keys(state.accounts).length} age=${ageSec}s bytes=${Buffer.byteLength(raw)}`);
-          NODE
-
-      - name: Setup Node.js 24
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
 
-      - name: Show runtime versions
+      - name: Set up runtime
         shell: bash
         run: |
-          set -euo pipefail
-          node --version
-          npm --version
-
-      - name: Install Playwright
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -f package.json ]; then
-            npm init -y >/dev/null 2>&1
-          fi
-          npm install --no-save --no-audit --no-fund playwright
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright
           npx playwright install --with-deps chromium
 
-      - name: Create and validate J1 raid script
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: .task-state
+          key: task-a-${{ github.ref_name }}
+          restore-keys: |
+            task-a-
+
+      - name: Prepare bundle
         shell: bash
         env:
-          RAID_SCRIPT_SOURCE: ${{ secrets.j1_raid_js }}
+          BUNDLE: ${{ secrets.J1_RAID_IS }}
         run: |
-          set -euo pipefail
-          SCRIPT_FILE="j1_raid.js"
+          test -n "$BUNDLE"
+          printf '%s' "$BUNDLE" > task.js
+          node --check task.js
+          CHECK_ONLY=1 node task.js > check.log
+          grep -q 'SELF_TEST_OK_' check.log
+          rm -f check.log
 
-          if [ -z "${RAID_SCRIPT_SOURCE:-}" ]; then
-            echo "::error::Secret j1_raid_js が未設定、または空です。"
-            exit 1
-          fi
-
-          printf '%s' "$RAID_SCRIPT_SOURCE" > "$SCRIPT_FILE"
-          FILE_SIZE="$(wc -c < "$SCRIPT_FILE")"
-          echo "Script created: $SCRIPT_FILE"
-          echo "Script size   : $FILE_SIZE bytes"
-
-          if [ "$FILE_SIZE" -lt 15000 ]; then
-            echo "::error::JSが小さすぎます。Secretへの貼り付け切れが疑われます。"
-            exit 1
-          fi
-
-          if [ "$FILE_SIZE" -ge 49152 ]; then
-            echo "::error::JSがGitHub Secretの48 KiB上限以上です。"
-            exit 1
-          fi
-
-          node --check "$SCRIPT_FILE"
-          echo "Wrapper syntax check passed."
-
-          node <<'NODE'
-          const fs = require('node:fs');
-          const zlib = require('node:zlib');
-          const wrapper = fs.readFileSync('j1_raid.js', 'utf8');
-
-          if (!/process\.env\.AUTH_URLS_TEXT\s*=\s*AUTH_URLS\.join\(/.test(wrapper)) {
-            console.error('::error::AUTH_URLS_TEXTブリッジがありません。');
-            process.exit(1);
-          }
-
-          const authBlock = wrapper.match(/const\s+AUTH_URLS\s*=\s*\[([\s\S]*?)\];/);
-          const authCount = authBlock
-            ? (authBlock[1].match(/https:\/\/dragoncraze\.com\/account\/mail_confirmation\?/g) || []).length
-            : 0;
-
-          if (authCount < 1) {
-            console.error('::error::AUTH_URLS配列から認証URLを検出できません。');
-            process.exit(1);
-          }
-
-          const payloadMatch = wrapper.match(/const\s+PAYLOAD='([^']+)'/s);
-          if (!payloadMatch) {
-            console.error('::error::圧縮PAYLOADを検出できません。');
-            process.exit(1);
-          }
-
-          let inner;
-          try {
-            inner = zlib.brotliDecompressSync(Buffer.from(payloadMatch[1], 'base64')).toString('utf8');
-            new Function(inner);
-          } catch (error) {
-            console.error(`::error::圧縮本体の展開・構文検査に失敗しました: ${error.message}`);
-            process.exit(1);
-          }
-
-          if (/\breturn[A-Za-z_$][A-Za-z0-9_$]*&&/.test(inner) || inner.includes('returnN&&')) {
-            console.error('::error::return文と識別子が結合した危険な圧縮コードを検出しました。');
-            process.exit(1);
-          }
-
-          if (/\.result\.questAdvances\s*[<>]=?[^;,)]+MAX_QUEST_ADVANCES|MAX_QUEST_ADVANCES[^;,)]+[<>]=?[^;,)]+\.result\.questAdvances/.test(inner)) {
-            console.error('::error::クエスト上限が累積値へ直接適用されています。実行中に永久停止する回帰です。');
-            process.exit(1);
-          }
-
-          if (!inner.includes('questAttemptAdvances') || !inner.includes('MAX_QUEST_ADVANCES')) {
-            console.error('::error::クエストの試行単位カウンターを検出できません。');
-            process.exit(1);
-          }
-
-          if (!inner.includes('Math.pow(.5,') || !inner.includes('EXTERNAL_DPS_STALE_SEC')) {
-            console.error('::error::外部DPSの時間減衰または失効処理がありません。');
-            process.exit(1);
-          }
-
-          if (!inner.includes('shouldOwnPressure') || !inner.includes('bpCurrent-20>=') || !inner.includes('OWN_PRESSURE_RESERVE_BP')) {
-            console.error('::error::自発圧力攻撃のBP予約条件がありません。');
-            process.exit(1);
-          }
-
-          if (!inner.includes('EXTERNAL_RESCUE_OWN_RESERVE_BP') || !inner.includes('externalOwnReserve')) {
-            console.error('::error::外部救援による自発用BP侵食を防ぐ予約条件がありません。');
-            process.exit(1);
-          }
-
-          if (!inner.includes('ENDED_AFTER_ATTACK_RECHECK_SEC') || !inner.includes('ended_after_attack_recheck_scheduled')) {
-            console.error('::error::ended_after_attack後の高速再確認処理がありません。');
-            process.exit(1);
-          }
-
-          if (/for\(const t of i\)\{if\([^}]+seenRescueTargets\.add\(t\.key\)[^}]+await X/.test(inner)) {
-            console.error('::error::救援参加成功前にseenへ登録する回帰を検出しました。');
-            process.exit(1);
-          }
-
-          const requiredMarkers = [
-            'SELF_TEST_OK_V8_1',
-            'DragonCraze Raid Economy v8.1',
-            'persistent_state_saved',
-            'persistent_state_session_restored',
-            'PERSIST_STATE_PATH',
-            'PERSIST_EXTERNAL_DPS_DISCOUNT_X100',
-            'questAttemptAdvances',
-            'QUEST_CAP_RETRY_SEC',
-            'paid_success_cooldown_scheduled',
-            'PAID_SUCCESS_COOLDOWN_SEC',
-            'ENDED_AFTER_ATTACK_RECHECK_SEC',
-            'ended_after_attack_recheck_scheduled',
-            'EXTERNAL_RESCUE_OWN_RESERVE_BP',
-            'externalOwnReserve',
-            'EXTERNAL_DPS_DECISION_DISCOUNT_X100',
-            'EXTERNAL_DPS_IDLE_HALF_LIFE_SEC',
-            'lastExternalDamageAt',
-            'OWN_PRESSURE_ENABLED',
-            'own_pressure_applied',
-            'rescue_join_retry_scheduled',
-            'findPersistedAccount',
-            'MEASURE_CONSOLE_MODE'
-          ];
-          for (const marker of requiredMarkers) {
-            if (!inner.includes(marker)) {
-              console.error(`::error::v8.1必須マーカーがありません: ${marker}`);
-              process.exit(1);
-            }
-          }
-
-          console.log(`Auth URLs: ${authCount}`);
-          console.log(`Inner source bytes: ${Buffer.byteLength(inner, 'utf8')}`);
-          console.log('Compressed-source regression checks passed.');
-          NODE
-
-      - name: Run v8.1 parser, state, mutex and regression self-test
+      - name: Execute bundle
         shell: bash
         env:
-          V8_SELF_TEST_ONLY: '1'
-          ALLOW_DUMMY_AUTH: '1'
-          MEASURE_ENABLED: 'false'
-          PERSIST_STATE_ENABLED: 'true'
-          V81_STATE_IO_SELF_TEST: '1'
-          PERSIST_STATE_PATH: ${{ runner.temp }}/v81-self-test/state.json
+          CONCURRENCY: '6'
+          RUN_BUDGET_MS: '1560000'
         run: |
-          set -euo pipefail
-          node --unhandled-rejections=strict j1_raid.js
-
-      - name: Initialize measurement file
-        shell: bash
-        run: |
-          set -euo pipefail
-          : > "$MEASURE_LOG_PATH"
-          mkdir -p "$(dirname "$PERSIST_STATE_PATH")"
-
-      - name: Run J1 raid script
-        shell: bash
-        run: |
-          set -euo pipefail
-          SCRIPT_FILE="j1_raid.js"
-
-          echo "========================================"
-          echo "J1 Raid Economy v8.1"
-          echo "Node               : $(node --version)"
-          echo "Account concurrency: ${CONCURRENCY}"
-          echo "Raid attack policy : same raid serialized"
-          echo "Persistent learning: deck, damage, raid/rescue state"
-          echo "Internal budget    : $((RUN_BUDGET_MS / 60000)) minutes"
-          echo "External limit     : 28 minutes"
-          echo "Quest retry        : ${QUEST_RETRY_SEC}s (cap retry ${QUEST_CAP_RETRY_SEC}s)"
-          echo "Quest budget       : ${MAX_QUEST_ADVANCES} advances per attempt"
-          echo "Paid success wait  : ${PAID_SUCCESS_COOLDOWN_SEC}s; ended recheck ${ENDED_AFTER_ATTACK_RECHECK_SEC}s"
-          echo "External DPS decay : ${EXTERNAL_DPS_IDLE_HALF_LIFE_SEC}s half-life, stale ${EXTERNAL_DPS_STALE_SEC}s"
-          echo "Own pressure       : minBP=${OWN_PRESSURE_MIN_BP}, reserve=${OWN_PRESSURE_RESERVE_BP}, max=${OWN_PRESSURE_MAX_PER_RUN}"
-          echo "External rescue reserve while own stalled: ${EXTERNAL_RESCUE_OWN_RESERVE_BP} BP"
-          echo "Idle page policy   : pages closed; contexts retained"
-          echo "Rescue wave earliest: ${RESCUE_WAVE_OFFSETS_SEC} (signal-gated)"
-          echo "Started at         : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          echo "========================================"
-
-          set +e
-          timeout \
-            --signal=TERM \
-            --kill-after=60s \
-            28m \
-            node \
-              --unhandled-rejections=strict \
-              "$SCRIPT_FILE"
-          EXIT_CODE=$?
-          set -e
-
-          echo "========================================"
-          echo "Finished at : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          echo "Exit code   : ${EXIT_CODE}"
-          echo "========================================"
-
-          case "$EXIT_CODE" in
-            0)
-              echo "J1 raid script completed successfully."
-              ;;
-            124)
-              echo "::notice::28分の外部タイムアウトに到達しました。TERM処理で状態保存を試行済みです。"
-              exit 0
-              ;;
-            143)
-              echo "::notice::TERMシグナルによって正常停止しました。"
-              exit 0
-              ;;
-            137)
-              echo "::error::60秒の終了猶予後も停止できず、強制終了されました。"
-              exit 137
-              ;;
-            *)
-              echo "::error::スクリプトがエラー終了しました。終了コード: ${EXIT_CODE}"
-              exit "$EXIT_CODE"
-              ;;
-          esac
-
-      - name: Validate persisted state
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          STATE_FILE="$PERSIST_STATE_PATH"
-          if [ ! -s "$STATE_FILE" ]; then
-            echo "::warning::永続状態ファイルがありません。認証前終了の場合は正常です。"
-            exit 0
-          fi
-          node <<'NODE'
-          const fs = require('node:fs');
-          const path = process.env.PERSIST_STATE_PATH;
-          const raw = fs.readFileSync(path, 'utf8');
-          const state = JSON.parse(raw);
-          if (state.schema !== 1 || state.version !== '8.1') {
-            throw new Error(`unexpected state schema/version: ${state.schema}/${state.version}`);
-          }
-          if (/mail_confirmation|authenticity_token|(?:^|["'])cookie["']|[?&]key=/i.test(raw)) {
-            throw new Error('sensitive material was detected in persisted state');
-          }
-          const accounts = Object.values(state.accounts || {});
-          const decks = accounts.reduce((sum, a) => sum + (a.deckCache?.profiles?.length || 0), 0);
-          const damageSamples = accounts.reduce((sum, a) => sum + Object.values(a.damageModel || {}).reduce((x, v) => x + (Array.isArray(v) ? v.length : 0), 0), 0);
-          const rescueCache = accounts.reduce((sum, a) => sum + (a.rescueCache?.length || 0), 0);
-          console.log(`Persisted state valid: accounts=${accounts.length} decks=${decks} damageSamples=${damageSamples} rescueCache=${rescueCache} bytes=${Buffer.byteLength(raw)}`);
-          NODE
-
-      - name: Show measurement summary
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -s "$MEASURE_LOG_PATH" ]; then
-            echo "Measurement file is empty."
-            exit 0
-          fi
-          echo "Measurement lines: $(wc -l < "$MEASURE_LOG_PATH")"
-          echo "Measurement bytes: $(wc -c < "$MEASURE_LOG_PATH")"
-          echo "----- Last 160 records -----"
-          tail -n 160 "$MEASURE_LOG_PATH"
-
-      - name: Save cross-run raid state
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: .raid-state/raid_state.json
-          key: raid-state-v8-1-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Upload raid measurements
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: raid-measurements-v8-1-${{ github.run_id }}
-          path: raid_measurements.jsonl
-          if-no-files-found: warn
-          retention-days: 7
-          compression-level: 6
+          timeout --signal=TERM --kill-after=20s 28m node task.js
