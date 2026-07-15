@@ -1,4 +1,4 @@
-name: J1 Raid Economy v8.0
+name: J1 Raid Economy v8.1
 
 on:
   workflow_dispatch:
@@ -55,6 +55,8 @@ env:
   PAID_NOOP_RETRY_SEC: 30
   PAID_NOOP_MAX_RETRIES: 2
   PAID_SUCCESS_COOLDOWN_SEC: 30
+  # 攻撃送信後にreadyも報酬も取れない場合は、通常45秒待たず5秒後に自発状態を再確認する。
+  ENDED_AFTER_ATTACK_RECHECK_SEC: 5
 
   # 管理アカウントの攻撃を外部DPSへ混ぜない。
   MANAGED_ACTION_SUPPRESS_SEC: 30
@@ -70,7 +72,7 @@ env:
   OWN_PRESSURE_RESERVE_BP: 20
   OWN_PRESSURE_CLEAR_SEC: 900
   OWN_PRESSURE_MIN_INTERVAL_SEC: 600
-  OWN_PRESSURE_MAX_PER_RUN: 2
+  OWN_PRESSURE_MAX_PER_RUN: 3
 
   # 残り時間が少ない管理自発・管理救援を優先。
   OWN_TIMEOUT_PRESSURE_SEC: 600
@@ -103,6 +105,9 @@ env:
   BP_OVERFLOW_MARGIN: 3
   MAX_OWN_PAID_HITS_PER_CYCLE: 5
   MAX_EXTERNAL_RESCUE_PAID_PER_RUN: 2
+  # 自発が停滞中のアカウントは、外部救援へ有料攻撃した後も最低40BPを残す。
+  # 管理アカウント発見レイドへの支援にはこの追加予約を適用しない。
+  EXTERNAL_RESCUE_OWN_RESERVE_BP: 40
   DEFAULT_NORMAL_DAMAGE: 500000
   DEFAULT_FULL_RATIO_X100: 250
   FINISH_SAFETY_X100: 120
@@ -133,8 +138,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .raid-state/raid_state.json
-          key: raid-state-v8-0-${{ github.run_id }}-${{ github.run_attempt }}
+          key: raid-state-v8-1-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            raid-state-v8-1-
             raid-state-v8-0-
             raid-state-v7-9-
             raid-state-v7-8-
@@ -146,7 +152,7 @@ jobs:
           mkdir -p .raid-state
           STATE_FILE=".raid-state/raid_state.json"
           if [ ! -s "$STATE_FILE" ]; then
-            echo "No previous v8.0/v7.9/v7.8 state was restored. This is normal on the first persistent-state run."
+            echo "No previous v8.1/v8.0/v7.9/v7.8 state was restored. This is normal on the first persistent-state run."
             exit 0
           fi
           node <<'NODE'
@@ -277,14 +283,24 @@ jobs:
             process.exit(1);
           }
 
+          if (!inner.includes('EXTERNAL_RESCUE_OWN_RESERVE_BP') || !inner.includes('externalOwnReserve')) {
+            console.error('::error::外部救援による自発用BP侵食を防ぐ予約条件がありません。');
+            process.exit(1);
+          }
+
+          if (!inner.includes('ENDED_AFTER_ATTACK_RECHECK_SEC') || !inner.includes('ended_after_attack_recheck_scheduled')) {
+            console.error('::error::ended_after_attack後の高速再確認処理がありません。');
+            process.exit(1);
+          }
+
           if (/for\(const t of i\)\{if\([^}]+seenRescueTargets\.add\(t\.key\)[^}]+await X/.test(inner)) {
             console.error('::error::救援参加成功前にseenへ登録する回帰を検出しました。');
             process.exit(1);
           }
 
           const requiredMarkers = [
-            'SELF_TEST_OK_V8_0',
-            'DragonCraze Raid Economy v8.0',
+            'SELF_TEST_OK_V8_1',
+            'DragonCraze Raid Economy v8.1',
             'persistent_state_saved',
             'persistent_state_session_restored',
             'PERSIST_STATE_PATH',
@@ -293,6 +309,10 @@ jobs:
             'QUEST_CAP_RETRY_SEC',
             'paid_success_cooldown_scheduled',
             'PAID_SUCCESS_COOLDOWN_SEC',
+            'ENDED_AFTER_ATTACK_RECHECK_SEC',
+            'ended_after_attack_recheck_scheduled',
+            'EXTERNAL_RESCUE_OWN_RESERVE_BP',
+            'externalOwnReserve',
             'EXTERNAL_DPS_DECISION_DISCOUNT_X100',
             'EXTERNAL_DPS_IDLE_HALF_LIFE_SEC',
             'lastExternalDamageAt',
@@ -304,7 +324,7 @@ jobs:
           ];
           for (const marker of requiredMarkers) {
             if (!inner.includes(marker)) {
-              console.error(`::error::v8.0必須マーカーがありません: ${marker}`);
+              console.error(`::error::v8.1必須マーカーがありません: ${marker}`);
               process.exit(1);
             }
           }
@@ -314,15 +334,15 @@ jobs:
           console.log('Compressed-source regression checks passed.');
           NODE
 
-      - name: Run v8.0 parser, state, mutex and regression self-test
+      - name: Run v8.1 parser, state, mutex and regression self-test
         shell: bash
         env:
           V8_SELF_TEST_ONLY: '1'
           ALLOW_DUMMY_AUTH: '1'
           MEASURE_ENABLED: 'false'
           PERSIST_STATE_ENABLED: 'true'
-          V80_STATE_IO_SELF_TEST: '1'
-          PERSIST_STATE_PATH: ${{ runner.temp }}/v80-self-test/state.json
+          V81_STATE_IO_SELF_TEST: '1'
+          PERSIST_STATE_PATH: ${{ runner.temp }}/v81-self-test/state.json
         run: |
           set -euo pipefail
           node --unhandled-rejections=strict j1_raid.js
@@ -341,7 +361,7 @@ jobs:
           SCRIPT_FILE="j1_raid.js"
 
           echo "========================================"
-          echo "J1 Raid Economy v8.0"
+          echo "J1 Raid Economy v8.1"
           echo "Node               : $(node --version)"
           echo "Account concurrency: ${CONCURRENCY}"
           echo "Raid attack policy : same raid serialized"
@@ -350,9 +370,10 @@ jobs:
           echo "External limit     : 28 minutes"
           echo "Quest retry        : ${QUEST_RETRY_SEC}s (cap retry ${QUEST_CAP_RETRY_SEC}s)"
           echo "Quest budget       : ${MAX_QUEST_ADVANCES} advances per attempt"
-          echo "Paid success wait  : ${PAID_SUCCESS_COOLDOWN_SEC} seconds"
+          echo "Paid success wait  : ${PAID_SUCCESS_COOLDOWN_SEC}s; ended recheck ${ENDED_AFTER_ATTACK_RECHECK_SEC}s"
           echo "External DPS decay : ${EXTERNAL_DPS_IDLE_HALF_LIFE_SEC}s half-life, stale ${EXTERNAL_DPS_STALE_SEC}s"
           echo "Own pressure       : minBP=${OWN_PRESSURE_MIN_BP}, reserve=${OWN_PRESSURE_RESERVE_BP}, max=${OWN_PRESSURE_MAX_PER_RUN}"
+          echo "External rescue reserve while own stalled: ${EXTERNAL_RESCUE_OWN_RESERVE_BP} BP"
           echo "Idle page policy   : pages closed; contexts retained"
           echo "Rescue wave earliest: ${RESCUE_WAVE_OFFSETS_SEC} (signal-gated)"
           echo "Started at         : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -411,7 +432,7 @@ jobs:
           const path = process.env.PERSIST_STATE_PATH;
           const raw = fs.readFileSync(path, 'utf8');
           const state = JSON.parse(raw);
-          if (state.schema !== 1 || state.version !== '8.0') {
+          if (state.schema !== 1 || state.version !== '8.1') {
             throw new Error(`unexpected state schema/version: ${state.schema}/${state.version}`);
           }
           if (/mail_confirmation|authenticity_token|(?:^|["'])cookie["']|[?&]key=/i.test(raw)) {
@@ -443,13 +464,13 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .raid-state/raid_state.json
-          key: raid-state-v8-0-${{ github.run_id }}-${{ github.run_attempt }}
+          key: raid-state-v8-1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload raid measurements
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: raid-measurements-v8-0-${{ github.run_id }}
+          name: raid-measurements-v8-1-${{ github.run_id }}
           path: raid_measurements.jsonl
           if-no-files-found: warn
           retention-days: 7
