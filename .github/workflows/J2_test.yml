@@ -1,4 +1,4 @@
-name: "Task A1"
+name: "Task A"
 
 on:
   workflow_dispatch:
@@ -6,9 +6,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: "task-a"
-  cancel-in-progress: false
 
 jobs:
   run:
@@ -53,8 +50,8 @@ jobs:
       - name: R5
         shell: bash
         env:
-          CONCURRENCY: '10'
-          RUN_BUDGET_MS: '1680000'
+          CONCURRENCY: '6'
+          RUN_BUDGET_MS: '1560000'
           PROD_LOG: '1'
           MEASURE_ENABLED: '0'
           LOG_LEVEL: "error"
