@@ -1,4 +1,4 @@
-name: "Task B"
+name: "Task B7"
 
 on:
   workflow_dispatch:
