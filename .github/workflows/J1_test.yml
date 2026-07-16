@@ -1,4 +1,4 @@
-name: Task A
+name: "Task A"
 
 on:
   workflow_dispatch:
@@ -6,9 +6,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: task-a
-  cancel-in-progress: false
 
 jobs:
   run:
@@ -18,7 +15,7 @@ jobs:
       - name: R1
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
 
       - name: R2
         shell: bash
@@ -57,6 +54,6 @@ jobs:
           RUN_BUDGET_MS: '1560000'
           PROD_LOG: '1'
           MEASURE_ENABLED: '0'
-          LOG_LEVEL: 'error'
+          LOG_LEVEL: "error"
         run: |
           timeout --signal=TERM --kill-after=20s 28m node task.js
