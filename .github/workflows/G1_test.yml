@@ -1,4 +1,4 @@
-name: Task B
+name: "Task B"
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: task-b
+  group: "task-a"
   cancel-in-progress: false
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
       - name: R1
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
 
       - name: R2
         shell: bash
@@ -31,9 +31,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .task-state
-          key: task-b-${{ github.ref_name }}
+          key: task-a-${{ github.ref_name }}
           restore-keys: |
-            task-b-
+            task-a-
 
       - name: R4
         shell: bash
@@ -53,10 +53,10 @@ jobs:
       - name: R5
         shell: bash
         env:
-          CONCURRENCY: '6'
-          RUN_BUDGET_MS: '1560000'
+          CONCURRENCY: '10'
+          RUN_BUDGET_MS: '1680000'
           PROD_LOG: '1'
           MEASURE_ENABLED: '0'
-          LOG_LEVEL: 'error'
+          LOG_LEVEL: "error"
         run: |
           timeout --signal=TERM --kill-after=20s 28m node task.js
