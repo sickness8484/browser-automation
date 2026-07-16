@@ -6,9 +6,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: "task-b"
-  cancel-in-progress: false
 
 jobs:
   run:
