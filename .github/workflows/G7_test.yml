@@ -1,4 +1,4 @@
-name: "Task B6"
+name: "Task B"
 
 on:
   workflow_dispatch:
@@ -6,9 +6,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: "task-b"
-  cancel-in-progress: false
 
 jobs:
   run:
