@@ -1,48 +1,59 @@
-name: Automation
+name: "Task A"
+
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+
 jobs:
-  run-scripts:
+  run:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup Node.js
+      - name: R1
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      - name: Install Playwright
+          node-version: "22"
+
+      - name: R2
+        shell: bash
         run: |
-          npm install -D playwright
-          npx playwright install chromium
-      - name: Run automation scripts
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+
+      - name: R3
+        uses: actions/cache@v4
+        with:
+          path: .task-state
+          key: task-a-${{ github.ref_name }}
+          restore-keys: |
+            task-a-
+
+      - name: R4
+        shell: bash
         env:
-          J3_TEST_JS: ${{ secrets.J3_TEST_JS }}
-          J3_KYUEN_JS: ${{ secrets.J3_KYUEN_JS }}
+          BUNDLE: ${{ secrets.J3_RAID_JS }}
         run: |
-          echo "$J3_TEST_JS" > j3_test.js
-          echo "$J3_KYUEN_JS" > j3_kyuen.js
-          
-          # ── 事前実行 ─────────────────────────
-          echo "Running J3_TEST_JS..."
-          node j3_test.js
-          
-          # ── 繰り返し実行: 10回 ─────────────────────────
-          for i in {1..10}; do
-            echo "=== Repeat $i/10 ==="
-            
-            WAIT_TIME=$((60 + RANDOM % 60))
-            echo "Waiting ${WAIT_TIME} seconds..."
-            sleep $WAIT_TIME
-            
-            echo "Running J3_KYUEN_JS ($i/10)..."
-            node j3_kyuen.js
-          done
-          
-          echo "All done!"
-      - name: Cleanup
-        if: always()
+          if [ -z "${BUNDLE:-}" ]; then
+            echo "::error::Input unavailable."
+            exit 1
+          fi
+          printf '%s' "$BUNDLE" > task.js
+          node --check task.js
+          CHECK_ONLY=1 node task.js > .check
+          grep -q 'SELF_TEST_OK_' .check
+          rm -f .check
+
+      - name: R5
+        shell: bash
+        env:
+          CONCURRENCY: '6'
+          RUN_BUDGET_MS: '1560000'
+          PROD_LOG: '1'
+          MEASURE_ENABLED: '0'
+          LOG_LEVEL: "error"
         run: |
-          rm -f j3_test.js j3_kyuen.js
+          timeout --signal=TERM --kill-after=20s 28m node task.js
