@@ -6,25 +6,28 @@ on:
 permissions:
   contents: read
 
-
 jobs:
   run:
+    name: Run Task
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
-      - name: R1
+      - name: Setup runtime
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: R2
+      - name: Install dependencies
         shell: bash
         run: |
+          set -Eeuo pipefail
+
           npm init -y >/dev/null 2>&1
           npm install --no-save playwright >/dev/null 2>&1
           npx playwright install --with-deps chromium >/dev/null 2>&1
 
-      - name: R3
+      - name: Restore state
         uses: actions/cache@v4
         with:
           path: .task-state
@@ -32,28 +35,61 @@ jobs:
           restore-keys: |
             task-b-
 
-      - name: R4
+      - name: Prepare and validate script
         shell: bash
         env:
           BUNDLE: ${{ secrets.G1_RAID_JS }}
         run: |
-          if [ -z "${BUNDLE:-}" ]; then
-            echo "::error::Input unavailable."
+          set -Eeuo pipefail
+
+          if [[ -z "${BUNDLE:-}" ]]; then
+            echo "::error::Script input is unavailable."
             exit 1
           fi
+
           printf '%s' "$BUNDLE" > task.js
+
+          if [[ ! -s task.js ]]; then
+            echo "::error::Generated script is empty."
+            exit 1
+          fi
+
+          echo "Checking JavaScript syntax..."
           node --check task.js
-          CHECK_ONLY=1 node task.js > .check
-          grep -q 'SELF_TEST_OK_' .check
+
+          echo "Running built-in self-test..."
+          CHECK_ONLY=1 node task.js | tee .check
+
+          if ! grep -Eq '^SELF_TEST_OK([ _]|$)' .check; then
+            echo "::error::The built-in self-test did not report success."
+            echo "----- self-test output -----"
+            cat .check
+            echo "----------------------------"
+            exit 1
+          fi
+
           rm -f .check
 
-      - name: R5
+          echo "Script validation completed successfully."
+
+      - name: Run script
         shell: bash
         env:
-          CONCURRENCY: '6'
-          RUN_BUDGET_MS: '1560000'
-          PROD_LOG: '1'
-          MEASURE_ENABLED: '0'
+          CONCURRENCY: "6"
+          RUN_BUDGET_MS: "1560000"
+          PROD_LOG: "1"
+          MEASURE_ENABLED: "0"
           LOG_LEVEL: "error"
         run: |
-          timeout --signal=TERM --kill-after=20s 28m node task.js
+          set -Eeuo pipefail
+
+          if [[ ! -s task.js ]]; then
+            echo "::error::Validated script file is unavailable."
+            exit 1
+          fi
+
+          timeout \
+            --signal=TERM \
+            --kill-after=20s \
+            28m \
+            node task.js
