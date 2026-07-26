@@ -1,0 +1,70 @@
+name: "Task J4"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+
+      - name: Restore task state
+        uses: actions/cache@v4
+        with:
+          path: .task-state
+          key: task-j4-${{ github.ref_name }}
+          restore-keys: |
+            task-j4-
+
+      - name: Create script
+        shell: bash
+        env:
+          BUNDLE: ${{ secrets.J4_RAID_JS }}
+        run: |
+          set -Eeuo pipefail
+
+          if [ -z "${BUNDLE:-}" ]; then
+            echo "::error::Secret J4_RAID_JS is empty or unavailable."
+            exit 1
+          fi
+
+          printf '%s' "$BUNDLE" > task.js
+
+          echo "[Check] Script bytes: $(wc -c < task.js)"
+
+          node --check task.js
+
+          echo "[Check] JavaScript syntax OK"
+
+      - name: Run task
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "[Task] Starting"
+
+          timeout \
+            --signal=TERM \
+            --kill-after=20s \
+            28m \
+            node task.js
+
+          echo "[Task] Completed"
