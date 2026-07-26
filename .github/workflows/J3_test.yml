@@ -28,9 +28,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .task-state
-          key: task-a-${{ github.ref_name }}
+          key: task-j3-${{ github.ref_name }}
           restore-keys: |
-            task-a-
+            task-j3-
 
       - name: R4
         shell: bash
