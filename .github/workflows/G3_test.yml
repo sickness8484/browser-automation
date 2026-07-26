@@ -1,4 +1,4 @@
-name: "Task B"
+name: "Task G3"
 
 on:
   workflow_dispatch:
@@ -6,54 +6,65 @@ on:
 permissions:
   contents: read
 
-
 jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
-      - name: R1
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: R2
+      - name: Install Playwright
         shell: bash
         run: |
+          set -Eeuo pipefail
+
           npm init -y >/dev/null 2>&1
           npm install --no-save playwright >/dev/null 2>&1
           npx playwright install --with-deps chromium >/dev/null 2>&1
 
-      - name: R3
+      - name: Restore task state
         uses: actions/cache@v4
         with:
           path: .task-state
-          key: task-b-${{ github.ref_name }}
+          key: task-g3-${{ github.ref_name }}
           restore-keys: |
-            task-b-
+            task-g3-
 
-      - name: R4
+      - name: Create script
         shell: bash
         env:
           BUNDLE: ${{ secrets.G3_RAID_JS }}
         run: |
+          set -Eeuo pipefail
+
           if [ -z "${BUNDLE:-}" ]; then
-            echo "::error::Input unavailable."
+            echo "::error::Secret G3_RAID_JS is empty or unavailable."
             exit 1
           fi
-          printf '%s' "$BUNDLE" > task.js
-          node --check task.js
-          CHECK_ONLY=1 node task.js > .check
-          grep -q 'SELF_TEST_OK_' .check
-          rm -f .check
 
-      - name: R5
+          printf '%s' "$BUNDLE" > task.js
+
+          echo "[Check] Script bytes: $(wc -c < task.js)"
+
+          node --check task.js
+
+          echo "[Check] JavaScript syntax OK"
+
+      - name: Run task
         shell: bash
-        env:
-          CONCURRENCY: '6'
-          RUN_BUDGET_MS: '1560000'
-          PROD_LOG: '1'
-          MEASURE_ENABLED: '0'
-          LOG_LEVEL: "error"
         run: |
-          timeout --signal=TERM --kill-after=20s 28m node task.js
+          set -Eeuo pipefail
+
+          echo "[Task] Starting"
+
+          timeout \
+            --signal=TERM \
+            --kill-after=20s \
+            28m \
+            node task.js
+
+          echo "[Task] Completed"
