@@ -13,7 +13,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 70
 
     steps:
       - name: Setup runtime
@@ -34,37 +34,58 @@ jobs:
         env:
           INPUT_A: ${{ secrets.COMBO_SUHAI_JS }}
           INPUT_B: ${{ secrets.NOCOMBO_SUHAI_JS }}
+          INPUT_C: ${{ secrets.ATTACKER_YELLOW_JS }}
+          INPUT_D: ${{ secrets.WALL_YELLOW_JS }}
         run: |
           set -Eeuo pipefail
-          test -n "$INPUT_A" || { echo "INPUT_A is empty"; exit 1; }
-          test -n "$INPUT_B" || { echo "INPUT_B is empty"; exit 1; }
+          for v in INPUT_A INPUT_B INPUT_C INPUT_D; do
+            test -n "${!v}" || { echo "$v is empty"; exit 1; }
+          done
           printf '%s' "$INPUT_A" > combo_suhai_js
           printf '%s' "$INPUT_B" > nocombo_suhai_js
-          node --check combo_suhai_js
-          node --check nocombo_suhai_js
-          test "$(wc -c < combo_suhai_js)" -le 49152
-          test "$(wc -c < nocombo_suhai_js)" -le 49152
+          printf '%s' "$INPUT_C" > attacker_yellow_js
+          printf '%s' "$INPUT_D" > wall_yellow_js
+          for f in combo_suhai_js nocombo_suhai_js attacker_yellow_js wall_yellow_js; do
+            node --check "$f"
+            test "$(wc -c < "$f")" -le 49152
+          done
           rm -rf .runtime-sync
           mkdir -p .runtime-sync
 
-      - name: Run pair
+      - name: Run chain
         shell: bash
         env:
           SYNC_DIR: ${{ github.workspace }}/.runtime-sync
         run: |
           set +e
-          node combo_suhai_js &
-          PID_A=$!
-          node nocombo_suhai_js &
-          PID_B=$!
+          node combo_suhai_js & PID_A=$!
+          node nocombo_suhai_js & PID_B=$!
 
-          wait "$PID_A"
-          STATUS_A=$?
-          wait "$PID_B"
-          STATUS_B=$?
+          HANDOFF=0
+          for _ in $(seq 1 9600); do
+            if [ -f .runtime-sync/suhai.handoff ]; then HANDOFF=1; break; fi
+            if ! kill -0 "$PID_A" 2>/dev/null && ! kill -0 "$PID_B" 2>/dev/null; then break; fi
+            sleep 0.2
+          done
+
+          if [ "$HANDOFF" -ne 1 ]; then
+            echo "handoff missing"
+            wait "$PID_A"; STATUS_A=$?
+            wait "$PID_B"; STATUS_B=$?
+            exit 1
+          fi
+
+          sleep 0.4
+          node attacker_yellow_js & PID_C=$!
+          node wall_yellow_js & PID_D=$!
+
+          wait "$PID_A"; STATUS_A=$?
+          wait "$PID_B"; STATUS_B=$?
+          wait "$PID_C"; STATUS_C=$?
+          wait "$PID_D"; STATUS_D=$?
 
           echo "A status: $STATUS_A"
           echo "B status: $STATUS_B"
-          if [ "$STATUS_A" -ne 0 ] || [ "$STATUS_B" -ne 0 ]; then
-            exit 1
-          fi
+          echo "C status: $STATUS_C"
+          echo "D status: $STATUS_D"
+          if [ "$STATUS_A" -ne 0 ] || [ "$STATUS_B" -ne 0 ] || [ "$STATUS_C" -ne 0 ] || [ "$STATUS_D" -ne 0 ]; then exit 1; fi
