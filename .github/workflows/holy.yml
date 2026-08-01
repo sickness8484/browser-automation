@@ -1,0 +1,70 @@
+name: "Task C"
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: task-c-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Setup runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+
+      - name: Restore inputs
+        shell: bash
+        env:
+          INPUT_A: ${{ secrets.COMBO_SUHAI_JS }}
+          INPUT_B: ${{ secrets.NOCOMBO_SUHAI_JS }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$INPUT_A" || { echo "INPUT_A is empty"; exit 1; }
+          test -n "$INPUT_B" || { echo "INPUT_B is empty"; exit 1; }
+          printf '%s' "$INPUT_A" > combo_suhai_js
+          printf '%s' "$INPUT_B" > nocombo_suhai_js
+          node --check combo_suhai_js
+          node --check nocombo_suhai_js
+          test "$(wc -c < combo_suhai_js)" -le 49152
+          test "$(wc -c < nocombo_suhai_js)" -le 49152
+          rm -rf .runtime-sync
+          mkdir -p .runtime-sync
+
+      - name: Run pair
+        shell: bash
+        env:
+          SYNC_DIR: ${{ github.workspace }}/.runtime-sync
+        run: |
+          set +e
+          node combo_suhai_js &
+          PID_A=$!
+          node nocombo_suhai_js &
+          PID_B=$!
+
+          wait "$PID_A"
+          STATUS_A=$?
+          wait "$PID_B"
+          STATUS_B=$?
+
+          echo "A status: $STATUS_A"
+          echo "B status: $STATUS_B"
+          if [ "$STATUS_A" -ne 0 ] || [ "$STATUS_B" -ne 0 ]; then
+            exit 1
+          fi
