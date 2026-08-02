@@ -49,35 +49,60 @@ jobs:
             node --check "$f"
             test "$(wc -c < "$f")" -le 49152
           done
-          rm -rf .runtime-sync
-          mkdir -p .runtime-sync
+          rm -rf .runtime-sync .runtime-debug
+          mkdir -p .runtime-sync .runtime-debug
 
       - name: Run chain
         shell: bash
         env:
           SYNC_DIR: ${{ github.workspace }}/.runtime-sync
+          COMBO_SLOT_MS: "420"
+          COMBO_RECOVER_EARLY_WP: "25"
         run: |
           set +e
-          node combo_suhai_js & PID_A=$!
-          node nocombo_suhai_js & PID_B=$!
+          PIDS=""
+          cleanup() {
+            for p in $PIDS; do
+              kill "$p" 2>/dev/null || true
+            done
+          }
+          trap cleanup EXIT INT TERM
+
+          node combo_suhai_js & PID_A=$!; PIDS="$PIDS $PID_A"
+          node nocombo_suhai_js & PID_B=$!; PIDS="$PIDS $PID_B"
 
           HANDOFF=0
-          for _ in $(seq 1 9600); do
-            if [ -f .runtime-sync/suhai.handoff ]; then HANDOFF=1; break; fi
-            if ! kill -0 "$PID_A" 2>/dev/null && ! kill -0 "$PID_B" 2>/dev/null; then break; fi
+          for i in $(seq 1 9600); do
+            if [ -f .runtime-sync/suhai.handoff ]; then
+              HANDOFF=1
+              echo "handoff detected after $((i / 5))s"
+              break
+            fi
+            if ! kill -0 "$PID_A" 2>/dev/null && ! kill -0 "$PID_B" 2>/dev/null; then
+              echo "both suhai processes exited before handoff"
+              break
+            fi
+            if [ $((i % 300)) -eq 0 ]; then
+              echo "handoff wait $((i / 5))s"
+              find .runtime-sync -maxdepth 1 -type f -printf '%f\n' | sort | tail -40
+            fi
             sleep 0.2
           done
 
           if [ "$HANDOFF" -ne 1 ]; then
             echo "handoff missing"
+            cleanup
             wait "$PID_A"; STATUS_A=$?
             wait "$PID_B"; STATUS_B=$?
+            echo "A status: $STATUS_A"
+            echo "B status: $STATUS_B"
+            echo "final sync markers:"
+            find .runtime-sync -maxdepth 1 -type f -printf '%f\n' | sort
             exit 1
           fi
 
-          sleep 0.4
-          node attacker_yellow_js & PID_C=$!
-          node wall_yellow_js & PID_D=$!
+          node attacker_yellow_js & PID_C=$!; PIDS="$PIDS $PID_C"
+          node wall_yellow_js & PID_D=$!; PIDS="$PIDS $PID_D"
 
           wait "$PID_A"; STATUS_A=$?
           wait "$PID_B"; STATUS_B=$?
@@ -88,4 +113,15 @@ jobs:
           echo "B status: $STATUS_B"
           echo "C status: $STATUS_C"
           echo "D status: $STATUS_D"
+          trap - EXIT INT TERM
           if [ "$STATUS_A" -ne 0 ] || [ "$STATUS_B" -ne 0 ] || [ "$STATUS_C" -ne 0 ] || [ "$STATUS_D" -ne 0 ]; then exit 1; fi
+
+
+      - name: Upload sanitized war debug
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-c-sanitized-debug-${{ github.run_id }}
+          path: .runtime-debug
+          if-no-files-found: ignore
+          retention-days: 3
