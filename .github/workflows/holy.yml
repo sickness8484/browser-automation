@@ -49,10 +49,10 @@ jobs:
       - name: Restore ten phase-role scripts
         shell: bash
         env:
-          WORSHIP_ATTACKER_JS: ${{ secrets.WORSHIP_ATTACKER_JS }}
-          WORSHIP_WALL_JS: ${{ secrets.WORSHIP_WALL_JS }}
-          SOUL_ATTACKER_JS: ${{ secrets.SOUL_ATTACKER_JS }}
-          SOUL_WALL_JS: ${{ secrets.SOUL_WALL_JS }}
+          WORSHIP_ATTACKER_JS: ${{ secrets.COMBO_SUHAI_JS }}
+          WORSHIP_WALL_JS: ${{ secrets._NOCOMBO_SUHAI_JS }}
+          SOUL_ATTACKER_JS: ${{ secrets.YELLOW_ATTACKER_JS }}
+          SOUL_WALL_JS: ${{ secrets.YELLOW_WALL_JS }}
           PURGATORY_ATTACKER_JS: ${{ secrets.PURGATORY_ATTACKER_JS }}
           PURGATORY_WALL_JS: ${{ secrets.PURGATORY_WALL_JS }}
           HATRED_ATTACKER_JS: ${{ secrets.HATRED_ATTACKER_JS }}
