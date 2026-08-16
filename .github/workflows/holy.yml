@@ -1,4 +1,4 @@
-name: "Task C Holy War v2.9.15 Secret Core + LOW MDEF ENTRY + LIVE BLUE RETURN + Ultimate DOM Fix + MAIN Guard + EV + Timed Adra + Board GET"
+name: "Task C Holy War v2.9.16 Secret Core + LOW MDEF ENTRY + LIVE BLUE RETURN + Ultimate DOM Fix + MAIN Guard + EV + Timed Adra + Board GET"
 
 "on":
   workflow_dispatch:
@@ -150,7 +150,7 @@ jobs:
           cat logs/restore_status.tsv
           invalid=$(awk -F '\t' '$2 !~ /^ready:/ {count++} END {print count+0}' logs/restore_status.tsv)
           {
-            echo '## Task C v2.9.15 role-secret restore'
+            echo '## Task C v2.9.16 role-secret restore'
             echo
             echo '| Script | Status |'
             echo '|---|---|'
@@ -163,7 +163,7 @@ jobs:
           rm -rf .runtime-sync .runtime-debug
           mkdir -p .runtime-sync .runtime-debug logs
 
-      - name: Restore secret core bundle v2.9.15 LOW MDEF + BLUE RETURN
+      - name: Restore secret core bundle v2.9.16 LOW MDEF + BLUE RETURN
         shell: bash
         env:
           HW_CORE_01: ${{ secrets.HW_CORE_01 }}
@@ -178,7 +178,7 @@ jobs:
           missing=0
           for key in HW_CORE_01 HW_CORE_02 HW_CORE_03; do
             if [ -z "${!key:-}" ]; then
-              echo "::error title=Secret core missing::$key is empty. Copy all three core chunks from the v23.19 HTML into Repository Secrets."
+              echo "::error title=Secret core missing::$key is empty. Copy all three core chunks from the v23.21 HTML into Repository Secrets."
               missing=1
             fi
           done
@@ -186,7 +186,7 @@ jobs:
 
           printf '%s%s%s' "$HW_CORE_01" "$HW_CORE_02" "$HW_CORE_03" > .runtime-secret/core.b64
           actual_b64_bytes=$(wc -c < .runtime-secret/core.b64 | tr -d ' ')
-          expected_b64_bytes="106856"
+          expected_b64_bytes="107660"
           if [ "$actual_b64_bytes" != "$expected_b64_bytes" ]; then
             echo "::error title=Secret core length mismatch::expected=$expected_b64_bytes actual=$actual_b64_bytes"
             exit 1
@@ -197,7 +197,7 @@ jobs:
             exit 1
           fi
           archive_sha=$(sha256sum .runtime-secret/core.tar.gz | awk '{print $1}')
-          expected_archive_sha="00d0098a6bffd6720ddef9ac91437a6ccd6782e7aaf24b4ba9376d1b9167ace1"
+          expected_archive_sha="fe8ad8146b9a00f8f557e630600c22f7af1952b577d28820886dcf3206476c89"
           if [ "$archive_sha" != "$expected_archive_sha" ]; then
             echo "::error title=Secret core SHA-256 mismatch::expected=$expected_archive_sha actual=$archive_sha"
             exit 1
@@ -228,20 +228,24 @@ jobs:
               exit 1
             fi
           }
-          verify_file preflight_roster.js "016511bc7c130f06a780de40bdbf2e306dd11ab235984b927e53b7f7730ed9c9"
-          verify_file phase_supervisor.js "5edf5f324e17d03f465dec0eb7b20cf691fd3d588aed700de61b7a756418a327"
-          verify_file scripts/holywar_engine_v299.js "9df056970c676f19f41489758fb91d6bf54affd9a4a1e3df3a07803d414dd3ec"
+          verify_file preflight_roster.js "daa90494fd273fc872cacb42f87072f4d1534fb19b1adc80f2f673d1d2b044d9"
+          verify_file phase_supervisor.js "c9c2aea07cf3fba93baee7307c606da25d6b92d11f927d1fbd62226ac3e1baa9"
+          verify_file scripts/holywar_engine_v299.js "6a3d63be75ae121368e7f12c8c2cbaa996854d4f293e4c80b5b5d3d2595e4173"
           verify_file scripts/holywar_policy_v299.js "86005913fd7033ec911943733e6abf5d226496608148f5e0e2e8f8b491ace726"
 
           node --check preflight_roster.js
           node --check scripts/holywar_policy_v299.js
           node --check scripts/holywar_engine_v299.js
           node --check phase_supervisor.js
-          grep -q "const VERSION = '2.9.15'" scripts/holywar_engine_v299.js
+          grep -q "const VERSION = '2.9.16'" scripts/holywar_engine_v299.js
           grep -q 'select\[name="sa_key"\]' preflight_roster.js
           grep -q 'candidateSelectCount' preflight_roster.js
           grep -q 'conflicting-member-overlap' preflight_roster.js
           grep -q 'guild-link-count-' preflight_roster.js
+          grep -q 'ULTIMATE_NAME_ALIASES' preflight_roster.js
+          grep -q "\['煉獄', '煉獄の陣'\]" scripts/holywar_engine_v299.js
+          grep -q "\['憎悪', '憎悪の織り手'\]" scripts/holywar_engine_v299.js
+          grep -q "\['蒼嵐', '蒼嵐の陣'\]" scripts/holywar_engine_v299.js
           grep -q 'targetPath' scripts/holywar_engine_v299.js
           grep -q 'semanticUltimate' scripts/holywar_engine_v299.js
           ! grep -q "炎のブレス.*damageType: 'physical'" scripts/holywar_engine_v299.js
@@ -355,7 +359,7 @@ jobs:
           console.log(JSON.stringify(result,null,2));
           if(process.env.GITHUB_STEP_SUMMARY){
             const rows=[
-              '## Task C v2.9.15 final status',
+              '## Task C v2.9.16 final status',
               '',
               `- Completed phases: ${done.join(', ') || '-'}`,
               `- Missing phases: ${missing.join(', ') || '-'}`,
@@ -393,5 +397,4 @@ jobs:
           rm -f preflight_roster.js phase_supervisor.js scripts/holywar_engine_v299.js scripts/holywar_policy_v299.js
           rm -rf .runtime-secret
           true
-
 
