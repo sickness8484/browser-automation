@@ -1,1 +1,397 @@
+name: "Task C Holy War v2.9.15 Secret Core + LOW MDEF ENTRY + LIVE BLUE RETURN + Ultimate DOM Fix + MAIN Guard + EV + Timed Adra + Board GET"
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: task-c-holy-war-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      SYNC_DIR: ${{ github.workspace }}/.runtime-sync
+      HW_SCRIPT_DIR: ${{ github.workspace }}/scripts
+      HW_GLOBAL_SLOT_MS: "420"
+      HW_LOCAL_GAP_MS: "2050"
+      HW_POLL_MS: "520"
+      HW_RUNTIME_MS: "7800000"
+      HW_CHAIN_TIMEOUT_MS: "7800000"
+      HW_POSSESSION_NAMES: "煉獄,蒼嵐"
+      HW_RAPHA_MIN_AFFECTED: "3"
+      HW_RAPHA_OFFENSE_LOSS: "0.18"
+      HW_RAPHA_DEFENSE_LOSS: "0.22"
+      HW_RAPHA_COOLDOWN_MS: "4200"
+      HW_PHYSICAL_BARRIER_MAX_WAIT_MS: "5200"
+      HW_PURG1_FUMES_MIN_RESERVE: "1"
+      HW_PURG2_FUMES_PREP_LIMIT: "16"
+      HW_ENEMY_INTEL_TTL_MS: "18000"
+      HW_SUPERBUFF_COUNTER_WINDOW_MS: "14000"
+      HW_SUPERBUFF_MAX_RESPONSES: "3"
+      HW_SUPERBUFF_ADRA_GRACE_MS: "1200"
+      HW_SUPERBUFF_CHAIN_GAP_MS: "440"
+      HW_SUPERBUFF_FASTLANE_MAX_LOCAL_WAIT_MS: "650"
+      HW_SUPERBUFF_CLUSTER_MS: "2600"
+      HW_RAPHA_ENEMY_BURST_LOOKAHEAD_S: "12"
+      HW_RAPHA_SEVERE_LOSS: "0.30"
+      HW_QUETZ_EV_GO: "500000000"
+      HW_QUETZ_EV_RELATIVE: "1.25"
+      HW_QUETZ_URGENT_SECONDS: "10"
+      HW_FUTURE_PAYLOAD_HIGH_COEFF: "96"
+      HW_GABRIEL_RELAY_LIMIT: "3"
+      HW_DAMAGE_MODEL: "continuous"
+      HW_COMBO_OVER1600_SLOPE: "0.0625"
+      HW_MELLOW_STRIP_WINDOW_MS: "22000"
+      HW_MELLOW_STRIP_LIMIT: "10"
+      HW_MELLOW_MIN_LEVEL: "17"
+      HW_MELLOW_ROTATION_SHOTS: "3"
+      HW_MELLOW_REAR_DELAY_MS: "6000"
+      HW_HYDRA_NEAR_LIMIT: "64"
+      HW_HYDRA_REMOTE_LIMIT: "64"
+      HW_HYDRA_MIN_LEVEL: "1"
+      HW_HYDRA_MIN_SECONDS_LEFT: "10"
+      HW_HYDRA_REMOTE_INTERLEAVE_MS: "1100"
+      HW_HYDRA_REMOTE_FLUSH_SECONDS: "12"
+      HW_QUETZ_DROP_RESERVE_WP: "50"
+      HW_GABRIEL_MIN_ACTIVE_MS: "1600"
+      HW_GABRIEL_SEVERE_ACTIVE_MS: "2200"
+      HW_ENEMY_AZURE_WALL_CADENCE_MS: "650"
+      HW_GABRIEL_MIN_DYING: "5"
+      HW_POSITION_COOLDOWN_MS: "6500"
+      HW_POSITION_LEASE_MS: "14000"
+      HW_REVIVE_PUNISH_WINDOW_MS: "7000"
+      HW_ENEMY_CARRY_REENTRY_WINDOW_MS: "45000"
+      HW_ENEMY_CARRY_REENTRY_MAX_STAGES: "3"
+      HW_MAINTENANCE_WP_RESERVE: "60"
+      HW_SPECIAL_SWAP_TO_NONWALL: "0"
+      HW_ENEMY_AZURE_PRE_ADRA_SECONDS: "3"
+      HW_ENEMY_AZURE_PRE_ADRA_CAP: "4"
+      HW_ENEMY_AZURE_REBUFF_ADRA_CAP: "4"
+      HW_ENEMY_AZURE_ADRA_BURST_WINDOW_MS: "2800"
+      HW_AZURE_PRE_CLOUD_DEBUFF_CAP: "4"
+      HW_ENEMY_ULT_BOARD_REPORT: "1"
+      # Default: isolate errors and keep later phases running. Set both to "1" only for CI gating.
+      HW_STRICT_PHASE_FAILURES: "0"
+      HW_STRICT_FINAL: "0"
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+
+      - name: Restore ten phase-role scripts
+        shell: bash
+        env:
+          COMBO_SUHAI_JS: ${{ secrets.COMBO_SUHAI_JS }}
+          NOCOMBO_SUHAI_JS: ${{ secrets.NOCOMBO_SUHAI_JS }}
+          ATTACKER_YELLOW_JS: ${{ secrets.ATTACKER_YELLOW_JS }}
+          WALL_YELLOW_JS: ${{ secrets.WALL_YELLOW_JS }}
+          PURGATORY_ATTACKER_JS: ${{ secrets.PURGATORY_ATTACKER_JS }}
+          PURGATORY_WALL_JS: ${{ secrets.PURGATORY_WALL_JS }}
+          HATRED_ATTACKER_JS: ${{ secrets.HATRED_ATTACKER_JS }}
+          HATRED_WALL_JS: ${{ secrets.HATRED_WALL_JS }}
+          AZURE_ATTACKER_JS: ${{ secrets.AZURE_ATTACKER_JS }}
+          AZURE_WALL_JS: ${{ secrets.AZURE_WALL_JS }}
+        run: |
+          set +e
+          mkdir -p scripts logs .runtime-sync .runtime-debug
+          : > logs/restore_status.tsv
+          declare -A MAP=(
+            [COMBO_SUHAI_JS]=worship_attacker.js
+            [NOCOMBO_SUHAI_JS]=worship_wall.js
+            [ATTACKER_YELLOW_JS]=soul_attacker.js
+            [WALL_YELLOW_JS]=soul_wall.js
+            [PURGATORY_ATTACKER_JS]=purgatory_attacker.js
+            [PURGATORY_WALL_JS]=purgatory_wall.js
+            [HATRED_ATTACKER_JS]=hatred_attacker.js
+            [HATRED_WALL_JS]=hatred_wall.js
+            [AZURE_ATTACKER_JS]=azure_attacker.js
+            [AZURE_WALL_JS]=azure_wall.js
+          )
+          for key in "${!MAP[@]}"; do
+            file="scripts/${MAP[$key]}"
+            if [ -z "${!key:-}" ]; then
+              printf '%s\t%s\n' "${MAP[$key]}" "missing-secret" >> logs/restore_status.tsv
+              continue
+            fi
+            printf '%s' "${!key}" > "$file"
+            bytes=$(wc -c < "$file")
+            if [ "$bytes" -gt 49152 ]; then
+              printf '%s\t%s\n' "${MAP[$key]}" "oversize:$bytes" >> logs/restore_status.tsv
+              rm -f "$file"
+              continue
+            fi
+            if ! node --check "$file" >/dev/null 2>&1; then
+              printf '%s\t%s\n' "${MAP[$key]}" "syntax-error" >> logs/restore_status.tsv
+              rm -f "$file"
+              continue
+            fi
+            if ! grep -Eq 'mail_confirmation\?|__HW_AUTH_COUNT__=[1-9][0-9]*' "$file"; then
+              printf '%s\t%s\n' "${MAP[$key]}" "auth-block-missing" >> logs/restore_status.tsv
+              rm -f "$file"
+              continue
+            fi
+            printf '%s\t%s\n' "${MAP[$key]}" "ready:$bytes" >> logs/restore_status.tsv
+          done
+          cat logs/restore_status.tsv
+          invalid=$(awk -F '\t' '$2 !~ /^ready:/ {count++} END {print count+0}' logs/restore_status.tsv)
+          {
+            echo '## Task C v2.9.15 role-secret restore'
+            echo
+            echo '| Script | Status |'
+            echo '|---|---|'
+            awk -F '\t' '{printf "| `%s` | `%s` |\n", $1, $2}' logs/restore_status.tsv
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$invalid" -ne 0 ]; then
+            echo "::error title=Task C startup blocked::$invalid required role script(s) are missing or invalid. Combat was not started."
+            exit 1
+          fi
+          rm -rf .runtime-sync .runtime-debug
+          mkdir -p .runtime-sync .runtime-debug logs
+
+      - name: Restore secret core bundle v2.9.15 LOW MDEF + BLUE RETURN
+        shell: bash
+        env:
+          HW_CORE_01: ${{ secrets.HW_CORE_01 }}
+          HW_CORE_02: ${{ secrets.HW_CORE_02 }}
+          HW_CORE_03: ${{ secrets.HW_CORE_03 }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p scripts logs .runtime-secret
+          trap 'rm -rf .runtime-secret' EXIT
+
+          missing=0
+          for key in HW_CORE_01 HW_CORE_02 HW_CORE_03; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error title=Secret core missing::$key is empty. Copy all three core chunks from the v23.19 HTML into Repository Secrets."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+          printf '%s%s%s' "$HW_CORE_01" "$HW_CORE_02" "$HW_CORE_03" > .runtime-secret/core.b64
+          actual_b64_bytes=$(wc -c < .runtime-secret/core.b64 | tr -d ' ')
+          expected_b64_bytes="106856"
+          if [ "$actual_b64_bytes" != "$expected_b64_bytes" ]; then
+            echo "::error title=Secret core length mismatch::expected=$expected_b64_bytes actual=$actual_b64_bytes"
+            exit 1
+          fi
+
+          if ! base64 --decode .runtime-secret/core.b64 > .runtime-secret/core.tar.gz; then
+            echo "::error title=Secret core decode failed::HW_CORE_01..03 are not the expected base64 bundle."
+            exit 1
+          fi
+          archive_sha=$(sha256sum .runtime-secret/core.tar.gz | awk '{print $1}')
+          expected_archive_sha="00d0098a6bffd6720ddef9ac91437a6ccd6782e7aaf24b4ba9376d1b9167ace1"
+          if [ "$archive_sha" != "$expected_archive_sha" ]; then
+            echo "::error title=Secret core SHA-256 mismatch::expected=$expected_archive_sha actual=$archive_sha"
+            exit 1
+          fi
+
+          tar -tzf .runtime-secret/core.tar.gz | sed 's#^\./##' | sort > .runtime-secret/archive_paths.txt
+          cat > .runtime-secret/expected_paths.txt <<'EOF'
+          phase_supervisor.js
+          preflight_roster.js
+          scripts/holywar_engine_v299.js
+          scripts/holywar_policy_v299.js
+          EOF
+          sort -o .runtime-secret/expected_paths.txt .runtime-secret/expected_paths.txt
+          if ! diff -u .runtime-secret/expected_paths.txt .runtime-secret/archive_paths.txt >/dev/null; then
+            echo "::error title=Secret core archive layout mismatch::unexpected file list; extraction refused."
+            exit 1
+          fi
+
+          tar -xzf .runtime-secret/core.tar.gz -C "$GITHUB_WORKSPACE"
+          chmod 600 preflight_roster.js phase_supervisor.js scripts/holywar_engine_v299.js scripts/holywar_policy_v299.js
+
+          verify_file() {
+            local file="$1" expected="$2" actual
+            [ -f "$file" ] || { echo "::error title=Secret core file missing::$file"; exit 1; }
+            actual=$(sha256sum "$file" | awk '{print $1}')
+            if [ "$actual" != "$expected" ]; then
+              echo "::error title=Secret core file hash mismatch::$file expected=$expected actual=$actual"
+              exit 1
+            fi
+          }
+          verify_file preflight_roster.js "016511bc7c130f06a780de40bdbf2e306dd11ab235984b927e53b7f7730ed9c9"
+          verify_file phase_supervisor.js "5edf5f324e17d03f465dec0eb7b20cf691fd3d588aed700de61b7a756418a327"
+          verify_file scripts/holywar_engine_v299.js "9df056970c676f19f41489758fb91d6bf54affd9a4a1e3df3a07803d414dd3ec"
+          verify_file scripts/holywar_policy_v299.js "86005913fd7033ec911943733e6abf5d226496608148f5e0e2e8f8b491ace726"
+
+          node --check preflight_roster.js
+          node --check scripts/holywar_policy_v299.js
+          node --check scripts/holywar_engine_v299.js
+          node --check phase_supervisor.js
+          grep -q "const VERSION = '2.9.15'" scripts/holywar_engine_v299.js
+          grep -q 'select\[name="sa_key"\]' preflight_roster.js
+          grep -q 'candidateSelectCount' preflight_roster.js
+          grep -q 'conflicting-member-overlap' preflight_roster.js
+          grep -q 'guild-link-count-' preflight_roster.js
+          grep -q 'targetPath' scripts/holywar_engine_v299.js
+          grep -q 'semanticUltimate' scripts/holywar_engine_v299.js
+          ! grep -q "炎のブレス.*damageType: 'physical'" scripts/holywar_engine_v299.js
+          grep -q 'dropcast-entry-select' scripts/holywar_engine_v299.js
+          grep -q 'entry-no-valid-mdef' scripts/holywar_engine_v299.js
+          grep -q 'lowest-unleased-after-race' scripts/holywar_engine_v299.js
+          grep -q 'dropcast-return-blue' scripts/holywar_engine_v299.js
+          grep -q 'dropcast-return-fallback-entry-partner' scripts/holywar_engine_v299.js
+          grep -q 'dropcast-return-no-blue-incident' scripts/holywar_engine_v299.js
+          grep -q 'positionTxnFile' scripts/holywar_engine_v299.js
+          grep -q 'rankLowestMdefEntryCandidates' scripts/holywar_engine_v299.js
+          grep -q 'rankBlueReturnCandidates' scripts/holywar_engine_v299.js
+          grep -q 'normalDropcastHardAllowed' scripts/holywar_engine_v299.js
+          grep -q 'SKILL_REVALIDATE' scripts/holywar_engine_v299.js
+          grep -q 'SKILL_COMMIT' scripts/holywar_engine_v299.js
+          grep -q 'SKILL_RESOLVED' scripts/holywar_engine_v299.js
+          grep -q "card_deco/bg/" scripts/holywar_engine_v299.js
+          grep -q "blue_" scripts/holywar_engine_v299.js
+          grep -q "span.orange" scripts/holywar_engine_v299.js
+          node - <<'NODE'
+          const fs=require('fs');
+          const s=fs.readFileSync('scripts/holywar_engine_v299.js','utf8');
+          const cut=(a,b)=>{const x=s.indexOf(a),y=s.indexOf(b,x+1);if(x<0||y<0)throw new Error(`static section missing ${a}`);return s.slice(x,y)};
+          const entry=cut('async function moveForDropcast','async function returnFromDropcast');
+          const ret=cut('async function returnFromDropcast','async function batchDropcast');
+          const primary=ret.slice(0,ret.indexOf('const fallback='));
+          if(!entry.includes('rankLowestMdefEntryCandidates'))throw new Error('normal ENTRY is not MDEF-ranked');
+          if(/positionPriorityForProfile|positionPriorityForSession/.test(entry))throw new Error('role priority leaked into normal ENTRY');
+          if(!ret.includes("c.position==='rear'&&c.blue===true"))throw new Error('normal RETURN does not hard-require LIVE blue');
+          if(primary.includes(".find(c=>c.profile===movement.entryPartner"))throw new Error('exact entry partner leaked into primary RETURN');
+          if(!ret.includes('dropcast-return-entry-fallback'))throw new Error('entry-partner emergency fallback missing');
+          const one=cut('async function singleShotDropcast','async function quetzCast');
+          if((one.match(/directAbility\(session/g)||[]).length!==1)throw new Error('singleShotDropcast must commit at most one direct ability');
+          if(!one.includes('returnFromDropcast(session, movement)'))throw new Error('singleShotDropcast return-finally missing');
+          console.log('Position static audit: LOWEST MDEF ENTRY -> ONE SHOT -> LIVE BLUE RETURN verified.');
+          NODE
+          grep -q 'positionPriorityForSession' scripts/holywar_engine_v299.js
+          grep -q 'revivePunishAction' scripts/holywar_engine_v299.js
+          grep -q 'observeEnemyCarryReentry' scripts/holywar_engine_v299.js
+          grep -q 'QUETZ_EV_GO' scripts/holywar_engine_v299.js
+          grep -q 'hpRecoveryAllowedAgainstEnemyUltimate' scripts/holywar_engine_v299.js
+          grep -q 'enemyAzureAdraBurstAction' scripts/holywar_engine_v299.js
+          grep -q 'azure-precloud-debuff' scripts/holywar_engine_v299.js
+          grep -q 'enemyUltimateBoardMessage' scripts/holywar_engine_v299.js
+          grep -q 'guild/set_comment' scripts/holywar_engine_v299.js
+          grep -q 'board-token-not-found' scripts/holywar_engine_v299.js
+          grep -q 'antiSuperBuffUnlocked' scripts/holywar_engine_v299.js
+          grep -q "purpose: index === 0 ? 'SACRIFICE' : 'MAIN'" preflight_roster.js
+          grep -q 'fallback REFUSED' scripts/holywar_engine_v299.js
+          grep -q 'fail-closed-before-post' scripts/holywar_engine_v299.js
+          grep -q 'ultimate-caster-down' scripts/holywar_engine_v299.js
+
+          cat > logs/core_restore_status.json <<EOF
+          {
+            "version": "2.9.15",
+            "source": "repository-secrets",
+            "chunks": 3,
+            "base64Bytes": $actual_b64_bytes,
+            "archiveSha256": "$archive_sha",
+            "engineSha256": "9df056970c676f19f41489758fb91d6bf54affd9a4a1e3df3a07803d414dd3ec",
+            "preflightSha256": "016511bc7c130f06a780de40bdbf2e306dd11ab235984b927e53b7f7730ed9c9",
+            "supervisorSha256": "5edf5f324e17d03f465dec0eb7b20cf691fd3d588aed700de61b7a756418a327",
+            "policySha256": "86005913fd7033ec911943733e6abf5d226496608148f5e0e2e8f8b491ace726"
+          }
+          EOF
+          echo "Secret core restored: 3 chunks, SHA-256 verified, 4/4 JavaScript syntax checks passed."
+          echo "Position policy: LOWEST MDEF ENTRY -> ONE SHOT -> LIVE BLUE RETURN (normal dropcast only)."
+
+      - name: Preflight roster and reserve available resources
+        shell: bash
+        run: |
+          set +e
+          node preflight_roster.js 2>&1 | tee logs/preflight.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > logs/preflight_exit_code.txt
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=Task C preflight failed::Roster or ultimate allocation is incomplete. Combat was not started. Check .runtime-debug/ultimate_dom_*.json when arts are missing."
+            exit "$status"
+          fi
+          test -f .runtime-sync/hw.global.resource_plan
+          echo "hw.global.resource_plan available"
+
+
+      - name: Run live five-phase chain
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          node phase_supervisor.js 2>&1 | tee logs/supervisor.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > logs/supervisor_exit_code.txt
+          echo "Supervisor exited $status; validation and artifact upload will still run."
+          exit 0
+
+      - name: Validate final chain
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          node - <<'NODE'
+          const fs=require('fs');
+          const path=require('path');
+          const phases=['worship','soul','purgatory','hatred','azure'];
+          const sync='.runtime-sync';
+          const done=phases.filter(x=>fs.existsSync(path.join(sync,`hw.phase.${x}.done`)));
+          const missing=phases.filter(x=>!done.includes(x));
+          const failures=fs.existsSync(sync)?fs.readdirSync(sync).filter(x=>x.startsWith('hw.failure.')||x==='hw.supervisor.degraded'):[];
+          const result={version:'2.9.15',done,missing,failures,degraded:missing.length>0||failures.length>0,strict:process.env.HW_STRICT_FINAL==='1'};
+          fs.mkdirSync('logs',{recursive:true});
+          fs.writeFileSync('logs/final_chain_status.json',JSON.stringify(result,null,2));
+          console.log(JSON.stringify(result,null,2));
+          if(process.env.GITHUB_STEP_SUMMARY){
+            const rows=[
+              '## Task C v2.9.15 final status',
+              '',
+              `- Completed phases: ${done.join(', ') || '-'}`,
+              `- Missing phases: ${missing.join(', ') || '-'}`,
+              `- Failure markers: ${failures.join(', ') || '-'}`,
+              `- Degraded: ${result.degraded}`
+            ];
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,rows.join('\n')+'\n');
+          }
+          if(result.degraded)console.log(`::warning title=Task C degraded::missing=${missing.join(',') || '-'} failures=${failures.join(',') || '-'}`);
+          if(result.strict&&result.degraded)process.exitCode=1;
+          NODE
+          find .runtime-sync -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort > logs/final_sync_files.txt || true
+          for file in logs/*_attacker.log logs/*_wall.log; do
+            [ -f "$file" ] && { echo "===== $file ====="; tail -300 "$file"; }
+          done
+          true
+
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-c-holy-war-v2-9-15-${{ github.run_id }}
+          path: |
+            logs
+            .runtime-sync
+            .runtime-debug
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: true
+      - name: Cleanup restored secret core
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          rm -f preflight_roster.js phase_supervisor.js scripts/holywar_engine_v299.js scripts/holywar_policy_v299.js
+          rm -rf .runtime-secret
+          true
+
 
