@@ -1,4 +1,4 @@
-name: "Task C Holy War v2.9.18 Secret Core + LOW MDEF ENTRY + LIVE BLUE RETURN + Ultimate DOM Fix + MAIN Guard + EV + Timed Adra + Board GET"
+name: "Task C Holy War v2.9.19 Secret Core + LOW MDEF ENTRY + LIVE BLUE RETURN + Ultimate DOM Fix + MAIN Guard + EV + Timed Adra + Board GET"
 
 "on":
   workflow_dispatch:
@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 150
     env:
       SYNC_DIR: ${{ github.workspace }}/.runtime-sync
+      HW_ULTIMATE_CACHE_DIR: ${{ github.workspace }}/.task-state/ultimate-roster-cache
+      HW_ULTIMATE_CACHE_MAX_AGE_MS: "1209600000"
       HW_SCRIPT_DIR: ${{ github.workspace }}/scripts
       HW_GLOBAL_SLOT_MS: "420"
       HW_LOCAL_GAP_MS: "2050"
@@ -150,7 +152,7 @@ jobs:
           cat logs/restore_status.tsv
           invalid=$(awk -F '\t' '$2 !~ /^ready:/ {count++} END {print count+0}' logs/restore_status.tsv)
           {
-            echo '## Task C v2.9.18 role-secret restore'
+            echo '## Task C v2.9.19 role-secret restore'
             echo
             echo '| Script | Status |'
             echo '|---|---|'
@@ -163,7 +165,7 @@ jobs:
           rm -rf .runtime-sync .runtime-debug
           mkdir -p .runtime-sync .runtime-debug logs
 
-      - name: Restore secret core bundle v2.9.18 LOW MDEF + BLUE RETURN
+      - name: Restore secret core bundle v2.9.19 LOW MDEF + BLUE RETURN
         shell: bash
         env:
           HW_CORE_01: ${{ secrets.HW_CORE_01 }}
@@ -178,7 +180,7 @@ jobs:
           missing=0
           for key in HW_CORE_01 HW_CORE_02 HW_CORE_03; do
             if [ -z "${!key:-}" ]; then
-              echo "::error title=Secret core missing::$key is empty. Copy all three core chunks from the v23.23 HTML into Repository Secrets."
+              echo "::error title=Secret core missing::$key is empty. Copy all three core chunks from the v23.24 HTML into Repository Secrets."
               missing=1
             fi
           done
@@ -186,7 +188,7 @@ jobs:
 
           printf '%s%s%s' "$HW_CORE_01" "$HW_CORE_02" "$HW_CORE_03" > .runtime-secret/core.b64
           actual_b64_bytes=$(wc -c < .runtime-secret/core.b64 | tr -d ' ')
-          expected_b64_bytes="109648"
+          expected_b64_bytes="113412"
           if [ "$actual_b64_bytes" != "$expected_b64_bytes" ]; then
             echo "::error title=Secret core length mismatch::expected=$expected_b64_bytes actual=$actual_b64_bytes"
             exit 1
@@ -197,7 +199,7 @@ jobs:
             exit 1
           fi
           archive_sha=$(sha256sum .runtime-secret/core.tar.gz | awk '{print $1}')
-          expected_archive_sha="3ad25d5c6f0b5e90f99ab58b313818b2715ade7eea3658a9737cdefbe70fec5c"
+          expected_archive_sha="5e755b83a964f005cdf7256700e4c588a3e4fbdeab74b973af50d04221ecfa15"
           if [ "$archive_sha" != "$expected_archive_sha" ]; then
             echo "::error title=Secret core SHA-256 mismatch::expected=$expected_archive_sha actual=$archive_sha"
             exit 1
@@ -228,16 +230,16 @@ jobs:
               exit 1
             fi
           }
-          verify_file preflight_roster.js "0bd2edcef9360a1ed5c15d4bc16257601c29d33ef5cd1784af34aa1797ad7f65"
-          verify_file phase_supervisor.js "9587df62423bda889e9ccec328577de3429c05d683fb0ff05d23a72d1557d1c3"
-          verify_file scripts/holywar_engine_v299.js "223530e57677fca3c5506acd4db2289ddd2f10f1c07b57d99abb30b0eae14a8a"
+          verify_file preflight_roster.js "fae525669bc55cef1aefd5df275d7099cd5b228a222cf098a691e6adfcfb4e19"
+          verify_file phase_supervisor.js "0f62998dec1409d8bbbf3cbc704557714b877b787da6f7b227c5c7b378b2111d"
+          verify_file scripts/holywar_engine_v299.js "1efb13e23dc047224400d775afa1e16c9a1aed757c3f2492e5f26d13e17c7763"
           verify_file scripts/holywar_policy_v299.js "86005913fd7033ec911943733e6abf5d226496608148f5e0e2e8f8b491ace726"
 
           node --check preflight_roster.js
           node --check scripts/holywar_policy_v299.js
           node --check scripts/holywar_engine_v299.js
           node --check phase_supervisor.js
-          grep -q "const VERSION = '2.9.18'" scripts/holywar_engine_v299.js
+          grep -q "const VERSION = '2.9.19'" scripts/holywar_engine_v299.js
           grep -q 'select\[name="sa_key"\]' preflight_roster.js
           grep -q 'candidateSelectCount' preflight_roster.js
           grep -q 'conflicting-member-overlap' preflight_roster.js
@@ -246,6 +248,11 @@ jobs:
           grep -q 'recoverUltimateArts' preflight_roster.js
           grep -q 'candidateSelectDetails' preflight_roster.js
           grep -q 'post-refresh-settle' preflight_roster.js
+          grep -q 'isOtherMemberUltimateLock' preflight_roster.js
+          grep -q 'readUltimateRosterCache' preflight_roster.js
+          grep -q 'seed-live-2026-08-16' preflight_roster.js
+          grep -q 'other-member-ultimate-active' preflight_roster.js
+          grep -q 'preflight_ultimate_cache.ndjson' preflight_roster.js
           grep -q 'nonPlaceholderOptionCount' preflight_roster.js
           grep -q 'valueLength' preflight_roster.js
           grep -q "profileHash: hash(field.profile)" preflight_roster.js
@@ -326,21 +333,30 @@ jobs:
 
           cat > logs/core_restore_status.json <<EOF
           {
-            "version": "2.9.18",
+            "version": "2.9.19",
             "source": "repository-secrets",
             "chunks": 3,
             "base64Bytes": $actual_b64_bytes,
             "archiveSha256": "$archive_sha",
-            "engineSha256": "223530e57677fca3c5506acd4db2289ddd2f10f1c07b57d99abb30b0eae14a8a",
-            "preflightSha256": "0bd2edcef9360a1ed5c15d4bc16257601c29d33ef5cd1784af34aa1797ad7f65",
-            "supervisorSha256": "9587df62423bda889e9ccec328577de3429c05d683fb0ff05d23a72d1557d1c3",
+            "engineSha256": "1efb13e23dc047224400d775afa1e16c9a1aed757c3f2492e5f26d13e17c7763",
+            "preflightSha256": "fae525669bc55cef1aefd5df275d7099cd5b228a222cf098a691e6adfcfb4e19",
+            "supervisorSha256": "0f62998dec1409d8bbbf3cbc704557714b877b787da6f7b227c5c7b378b2111d",
             "policySha256": "86005913fd7033ec911943733e6abf5d226496608148f5e0e2e8f8b491ace726"
           }
           EOF
           echo "Secret core restored: 3 chunks, SHA-256 verified, 4/4 JavaScript syntax checks passed."
           echo "Position policy: LOWEST MDEF ENTRY -> ONE SHOT -> LIVE BLUE RETURN (normal dropcast only)."
 
+      - name: Restore cached LIVE ultimate roster
+        uses: actions/cache/restore@v4
+        with:
+          path: .task-state/ultimate-roster-cache
+          key: task-c-ultimate-roster-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            task-c-ultimate-roster-${{ github.ref_name }}-
+
       - name: Preflight roster and reserve available resources
+        id: preflight
         shell: bash
         run: |
           set +e
@@ -348,11 +364,19 @@ jobs:
           status=${PIPESTATUS[0]}
           echo "$status" > logs/preflight_exit_code.txt
           if [ "$status" -ne 0 ]; then
-            echo "::error title=Task C preflight failed::Roster or ultimate allocation is incomplete. Combat was not started. Check .runtime-debug/ultimate_dom_*.json when arts are missing."
+            echo "::error title=Task C preflight failed::Roster or ultimate allocation is incomplete. Combat was not started. If the game says 他の団員が発動中, cached LIVE roster is used; otherwise check .runtime-debug/ultimate_dom_*.json."
             exit "$status"
           fi
           test -f .runtime-sync/hw.global.resource_plan
           echo "hw.global.resource_plan available"
+
+
+      - name: Save refreshed ultimate roster cache
+        if: ${{ steps.preflight.outcome == 'success' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .task-state/ultimate-roster-cache
+          key: task-c-ultimate-roster-${{ github.ref_name }}-${{ github.run_id }}
 
 
       - name: Run live five-phase chain
@@ -379,13 +403,13 @@ jobs:
           const done=phases.filter(x=>fs.existsSync(path.join(sync,`hw.phase.${x}.done`)));
           const missing=phases.filter(x=>!done.includes(x));
           const failures=fs.existsSync(sync)?fs.readdirSync(sync).filter(x=>x.startsWith('hw.failure.')||x==='hw.supervisor.degraded'):[];
-          const result={version:'2.9.18',done,missing,failures,degraded:missing.length>0||failures.length>0,strict:process.env.HW_STRICT_FINAL==='1'};
+          const result={version:'2.9.19',done,missing,failures,degraded:missing.length>0||failures.length>0,strict:process.env.HW_STRICT_FINAL==='1'};
           fs.mkdirSync('logs',{recursive:true});
           fs.writeFileSync('logs/final_chain_status.json',JSON.stringify(result,null,2));
           console.log(JSON.stringify(result,null,2));
           if(process.env.GITHUB_STEP_SUMMARY){
             const rows=[
-              '## Task C v2.9.18 final status',
+              '## Task C v2.9.19 final status',
               '',
               `- Completed phases: ${done.join(', ') || '-'}`,
               `- Missing phases: ${missing.join(', ') || '-'}`,
@@ -407,7 +431,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: task-c-holy-war-v2-9-17-${{ github.run_id }}
+          name: task-c-holy-war-v2-9-19-${{ github.run_id }}
           path: |
             logs
             .runtime-sync
