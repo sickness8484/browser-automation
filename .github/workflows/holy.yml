@@ -1,4 +1,4 @@
-name: "Task C Holy War v2.9.21 Secret Core + Recovery RCA Fix + Ordered External Ultimates + HARD Light Seal + Worship Local Fast Lane + LOW MDEF/BLUE RETURN"
+name: "Task C Holy War v2.9.22 Secret Core + Recovery RCA Fix + Ordered External Ultimates + HARD Light Seal + Worship Local Fast Lane + LOW MDEF/BLUE RETURN"
 
 "on":
   workflow_dispatch:
@@ -158,7 +158,7 @@ jobs:
           cat logs/restore_status.tsv
           invalid=$(awk -F '\t' '$2 !~ /^ready:/ {count++} END {print count+0}' logs/restore_status.tsv)
           {
-            echo '## Task C v2.9.21 role-secret restore'
+            echo '## Task C v2.9.22 role-secret restore'
             echo
             echo '| Script | Status |'
             echo '|---|---|'
@@ -171,7 +171,7 @@ jobs:
           rm -rf .runtime-sync .runtime-debug
           mkdir -p .runtime-sync .runtime-debug logs
 
-      - name: Restore secret core bundle v2.9.21 RECOVERY + ORDERED ULT + LIGHT INSURANCE
+      - name: Restore secret core bundle v2.9.22 RECOVERY + ORDERED ULT + HARD LIGHT SEAL + ENEMY ULT HOLD
         shell: bash
         env:
           HW_CORE_01: ${{ secrets.HW_CORE_01 }}
@@ -194,7 +194,7 @@ jobs:
 
           printf '%s%s%s' "$HW_CORE_01" "$HW_CORE_02" "$HW_CORE_03" > .runtime-secret/core.b64
           actual_b64_bytes=$(wc -c < .runtime-secret/core.b64 | tr -d ' ')
-          expected_b64_bytes="120180"
+          expected_b64_bytes="121096"
           if [ "$actual_b64_bytes" != "$expected_b64_bytes" ]; then
             echo "::error title=Secret core length mismatch::expected=$expected_b64_bytes actual=$actual_b64_bytes"
             exit 1
@@ -205,7 +205,7 @@ jobs:
             exit 1
           fi
           archive_sha=$(sha256sum .runtime-secret/core.tar.gz | awk '{print $1}')
-          expected_archive_sha="1982d7b004bd0777e27dd9bd82e6b1ec219747806e515d704f94d8197db4c126"
+          expected_archive_sha="f282e32cc44ad615ba50822e56a047ec94689fdfb83fd213c4cb8a7749435a56"
           if [ "$archive_sha" != "$expected_archive_sha" ]; then
             echo "::error title=Secret core SHA-256 mismatch::expected=$expected_archive_sha actual=$archive_sha"
             exit 1
@@ -236,16 +236,16 @@ jobs:
               exit 1
             fi
           }
-          verify_file preflight_roster.js "8ed707454c209b4e3037907743cb0f50e5d1cd5a098a9fe1b4336f8ab6af858e"
-          verify_file phase_supervisor.js "39faa35af286a66bed9b0fe84bab4d0363e95975e4196f56a06ea39a22f4e2bb"
-          verify_file scripts/holywar_engine_v299.js "a5c24effad5788971aaa3ab7f4a57766b7a241972dab67df1d1e883bbb739465"
+          verify_file preflight_roster.js "1fd44d4c6f713c6dc59eeed01990922eff375bcb4068274118651cc37d1bc598"
+          verify_file phase_supervisor.js "b47aba612c08aa5861beab39655dc56c80c6a7475a64fed4f377b41d0b57b468"
+          verify_file scripts/holywar_engine_v299.js "86d982ee728e8484e77bd4ad1994852d710542661292f462601a954764031464"
           verify_file scripts/holywar_policy_v299.js "de6f0fe5c47670336a4b36a905f7c8ec7f0d8529c0b4076c30e431a91af3d864"
 
           node --check preflight_roster.js
           node --check scripts/holywar_policy_v299.js
           node --check scripts/holywar_engine_v299.js
           node --check phase_supervisor.js
-          grep -q "const VERSION = '2.9.20'" scripts/holywar_engine_v299.js
+          grep -q "const VERSION = '2.9.22'" scripts/holywar_engine_v299.js
           grep -q 'select\[name="sa_key"\]' preflight_roster.js
           grep -q 'candidateSelectCount' preflight_roster.js
           grep -q 'conflicting-member-overlap' preflight_roster.js
@@ -324,7 +324,7 @@ jobs:
           grep -q 'fallback REFUSED' scripts/holywar_engine_v299.js
           grep -q 'fail-closed-before-post' scripts/holywar_engine_v299.js
           grep -q 'ultimate-caster-down' scripts/holywar_engine_v299.js
-          # v2.9.21 live-RCA regression guards.
+          # v2.9.22 live-RCA regression guards.
           grep -q '/quest/_index' scripts/holywar_engine_v299.js
           grep -q '/quest/_advance_frame' scripts/holywar_engine_v299.js
           ! grep -q 'navigate(session.page, `${BASE}/quest`, `recover-quest' scripts/holywar_engine_v299.js
@@ -342,6 +342,9 @@ jobs:
           grep -q 'NONCOMBO_MYSTIC_MISSING: 神秘なし → 突撃へfail-soft' scripts/holywar_engine_v299.js
           grep -q 'enemyMainAzureStatus' scripts/holywar_engine_v299.js
           grep -q 'ALL Light Curtain hard-sealed until enemy MAIN Azure' scripts/holywar_engine_v299.js
+          grep -q 'cheapFillerAllowedAgainstEnemyUltimate' scripts/holywar_engine_v299.js
+          grep -q 'ENEMY_ULT_HOLD:' scripts/holywar_engine_v299.js
+          grep -q 'only enemy Purgatory permits cheap filler' scripts/holywar_engine_v299.js
           grep -q 'externalLaunchGateReady' phase_supervisor.js
           node - <<'NODE'
           const fs=require('fs'),path=require('path'),assert=require('assert');
@@ -356,7 +359,7 @@ jobs:
           console.log('Audit-fix static gate: supervisor aliases + privacy + intel aging + board reservation verified.');
           NODE
 
-          # v2.9.21 Light hard-seal regression: ALL copies are reserved, and generic counters cannot spend them.
+          # v2.9.22 Light hard-seal regression: ALL copies are reserved, and generic counters cannot spend them.
           node - <<'NODE'
           const fs=require('fs'),assert=require('assert');
           const pre=require('./preflight_roster');
@@ -374,7 +377,34 @@ jobs:
           const block=eng.slice(eng.indexOf('function chooseEnemyBuffCounter'),eng.indexOf('function timedSlotFile'));
           assert(!block.includes("byName('光の幕')"),'generic anti-superbuff can still consume Light Curtain');
           assert(eng.includes("kind = 'charge-fallback'"),'noncombo no-Mystic Charge fallback missing');
-          console.log('v2.9.21 Light hard seal + Worship fallback regression: PASS');
+          console.log('v2.9.22 Light hard seal + Worship fallback regression: PASS');
+          NODE
+
+          # v2.9.22 enemy-ultimate filler regression: Soul/Hatred/Azure block cheap filler, Purgatory allows it.
+          node - <<'NODE'
+          const fs=require('fs'),os=require('os'),path=require('path'),assert=require('assert');
+          const enginePath=path.resolve('scripts/holywar_engine_v299.js');
+          const wr=(sync,name,data)=>{fs.mkdirSync(sync,{recursive:true});fs.writeFileSync(path.join(sync,name),JSON.stringify({at:Date.now(),...data}));};
+          const rm=(sync,name)=>{try{fs.unlinkSync(path.join(sync,name));}catch{}};
+          (async()=>{
+            const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2922-enemyhold-'));
+            process.env.SYNC_DIR=sync;process.env.HW_TEST_MODE='1';process.env.HW_ROLE_PHASE='worship';process.env.HW_ROLE_KIND='attacker';process.env.HW_ROLE_TAG='RGH';
+            delete require.cache[require.resolve(enginePath)];const e=require(enginePath);
+            const active=(name,level=6)=>({name,level,state:'ACTIVE',lastSeenAt:Date.now(),activeTimerKnown:false,running:true});
+            wr(sync,'hw.global.ultimate_intel.enemy',active('魂の織り手'));
+            assert.equal(e.cheapFillerAllowedAgainstEnemyUltimate(),false,'enemy Soul must block cheap filler');
+            assert.equal(e.hpRecoveryAllowedAgainstEnemyUltimate({name:'治癒',desc:''}),false,'enemy Soul must block cure');
+            wr(sync,'hw.global.ultimate_intel.enemy',active('憎悪の織り手'));
+            assert.equal(e.cheapFillerAllowedAgainstEnemyUltimate(),false,'enemy Hatred must block cheap filler');
+            wr(sync,'hw.global.ultimate_intel.enemy',active('蒼嵐の陣',20));
+            assert.equal(e.cheapFillerAllowedAgainstEnemyUltimate(),false,'enemy Azure must block cheap filler');
+            wr(sync,'hw.global.ultimate_intel.enemy',active('煉獄の陣'));
+            assert.equal(e.cheapFillerAllowedAgainstEnemyUltimate(),true,'enemy Purgatory must allow cheap filler');
+            assert.equal(e.hpRecoveryAllowedAgainstEnemyUltimate({name:'治癒',desc:''}),true,'enemy Purgatory must allow cure');
+            rm(sync,'hw.global.ultimate_intel.enemy');
+            assert.equal(e.cheapFillerAllowedAgainstEnemyUltimate(),true,'no enemy ultimate must allow normal action');
+            console.log('v2.9.22 enemy ultimate cheap-filler hold regression: PASS');
+          })().catch(e=>{console.error(e);process.exit(1)});
           NODE
 
           # Ordered-ultimate regression: no browser/network I/O; engine exports are exercised in HW_TEST_MODE.
@@ -389,7 +419,7 @@ jobs:
           }
           (async()=>{
             { // External/manual Worship #1 must consume R1, then the next one is R2.
-              const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2920-w-')),e=await load('worship','RGW',sync);
+              const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2922-w-')),e=await load('worship','RGW',sync);
               wr(sync,'hw.obs.worship.a',{profile:'p1',current:{name:'崇拝の言葉',level:6,state:'PENDING',pendingSeconds:20,pendingTimerKnown:true},skills:[],arts:[]});
               let st=await e.syncPhaseState();assert.equal(st.round,1);assert.equal(st.source,'external-or-manual');
               wr(sync,'hw.obs.worship.a',{profile:'p1',current:{name:'',state:'NONE'},skills:[],arts:[]});
@@ -399,7 +429,7 @@ jobs:
               st=await e.syncPhaseState();assert.equal(st.round,2);
             }
             { // Future-phase manual Soul before Worship completion is quarantined, never consumes Soul R1.
-              const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2920-s-')),e=await load('soul','RGS',sync);
+              const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2922-s-')),e=await load('soul','RGS',sync);
               wr(sync,'hw.obs.soul.a',{profile:'p1',current:{name:'魂の織り手',level:6,state:'PENDING'},skills:[],arts:[]});
               let st=await e.syncPhaseState();assert.equal(st.round,0);assert.equal(st.quarantined,true);
               wr(sync,'hw.phase.worship.done',{round:2});wr(sync,'hw.phase.worship.cleanup.done',{ok:true});
@@ -409,31 +439,31 @@ jobs:
               st=await e.syncPhaseState();assert.equal(st.round,1);
             }
             { // An external ultimate may temporarily hide sa_key options; the preflight R1/R2 plan must survive.
-              const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2920-a-')),e=await load('worship','RGA',sync);
+              const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2922-a-')),e=await load('worship','RGA',sync);
               wr(sync,'hw.roster.worship.attacker.x',{profile:'pA',account:'WA01',role:'attacker',arts:[],hasPossession:false});
               wr(sync,'hw.roster.worship.attacker.y',{profile:'pB',account:'WA02',role:'attacker',arts:[],hasPossession:false});
               wr(sync,'hw.global.assignments',{phases:{worship:[{round:1,profile:'pA',name:'崇拝の言葉',level:6,key:'super_art_4'},{round:2,profile:'pB',name:'崇拝の言葉',level:6,key:'super_art_4'}]}});
               const plan=await e.buildAssignments();assert.equal(plan.assignments.length,2);assert.equal(plan.assignments[0].liveValidation,'deferred-until-cast');
             }
-            console.log('v2.9.21 sequence regression: PASS');
+            console.log('v2.9.22 sequence regression: PASS');
           })().catch(e=>{console.error(e);process.exit(1)});
           NODE
 
           cat > logs/core_restore_status.json <<EOF
           {
-            "version": "2.9.21",
+            "version": "2.9.22",
             "source": "repository-secrets",
             "chunks": 3,
             "base64Bytes": $actual_b64_bytes,
             "archiveSha256": "$archive_sha",
-            "engineSha256": "a5c24effad5788971aaa3ab7f4a57766b7a241972dab67df1d1e883bbb739465",
-            "preflightSha256": "8ed707454c209b4e3037907743cb0f50e5d1cd5a098a9fe1b4336f8ab6af858e",
-            "supervisorSha256": "39faa35af286a66bed9b0fe84bab4d0363e95975e4196f56a06ea39a22f4e2bb",
+            "engineSha256": "86d982ee728e8484e77bd4ad1994852d710542661292f462601a954764031464",
+            "preflightSha256": "1fd44d4c6f713c6dc59eeed01990922eff375bcb4068274118651cc37d1bc598",
+            "supervisorSha256": "b47aba612c08aa5861beab39655dc56c80c6a7475a64fed4f377b41d0b57b468",
             "policySha256": "de6f0fe5c47670336a4b36a905f7c8ec7f0d8529c0b4076c30e431a91af3d864"
           }
           EOF
           echo "Secret core restored: 3 chunks, SHA-256 verified, 4/4 JavaScript syntax checks passed."
-          echo "Position policy: LOWEST MDEF ENTRY -> ONE SHOT -> LIVE BLUE RETURN. Recovery: /quest/_index route + backoff + ultimate-priority abort. Ultimate order: external/manual target consumes only the current ordered round; out-of-order future ultimates are quarantined. Light Curtain: HARD SEAL all copies until enemy MAIN Azure. Worship basics: account-local 2050ms fast lane, no guild-wide serialization."
+          echo "Position policy: LOWEST MDEF ENTRY -> ONE SHOT -> LIVE BLUE RETURN. Recovery: /quest/_index route + backoff + ultimate-priority abort. Ultimate order: external/manual target consumes only the current ordered round; out-of-order future ultimates are quarantined. Light Curtain: HARD SEAL all copies until enemy MAIN Azure. Worship basics: account-local 2050ms fast lane, no guild-wide serialization; enemy non-Purgatory ACTIVE => cheap filler HOLD."
 
       - name: Restore cached LIVE ultimate roster
         uses: actions/cache/restore@v4
@@ -491,13 +521,13 @@ jobs:
           const done=phases.filter(x=>fs.existsSync(path.join(sync,`hw.phase.${x}.done`)));
           const missing=phases.filter(x=>!done.includes(x));
           const failures=fs.existsSync(sync)?fs.readdirSync(sync).filter(x=>x.startsWith('hw.failure.')||x==='hw.supervisor.degraded'):[];
-          const result={version:'2.9.20',done,missing,failures,degraded:missing.length>0||failures.length>0,strict:process.env.HW_STRICT_FINAL==='1'};
+          const result={version:'2.9.22',done,missing,failures,degraded:missing.length>0||failures.length>0,strict:process.env.HW_STRICT_FINAL==='1'};
           fs.mkdirSync('logs',{recursive:true});
           fs.writeFileSync('logs/final_chain_status.json',JSON.stringify(result,null,2));
           console.log(JSON.stringify(result,null,2));
           if(process.env.GITHUB_STEP_SUMMARY){
             const rows=[
-              '## Task C v2.9.21 final status',
+              '## Task C v2.9.22 final status',
               '',
               `- Completed phases: ${done.join(', ') || '-'}`,
               `- Missing phases: ${missing.join(', ') || '-'}`,
@@ -519,7 +549,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: task-c-holy-war-v2-9-19-${{ github.run_id }}
+          name: task-c-holy-war-v2-9-22-${{ github.run_id }}
           path: |
             logs
             .runtime-sync
