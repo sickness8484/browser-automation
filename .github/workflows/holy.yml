@@ -1,4 +1,4 @@
-name: "Task C Holy War v2.9.19 Secret Core + LOW MDEF ENTRY + LIVE BLUE RETURN + Ultimate DOM Fix + MAIN Guard + EV + Timed Adra + Board GET"
+name: "Task C Holy War v2.9.21 Secret Core + Recovery RCA Fix + Ordered External Ultimates + HARD Light Seal + Worship Local Fast Lane + LOW MDEF/BLUE RETURN"
 
 "on":
   workflow_dispatch:
@@ -75,6 +75,12 @@ jobs:
       HW_ENEMY_AZURE_PRE_ADRA_CAP: "4"
       HW_ENEMY_AZURE_REBUFF_ADRA_CAP: "4"
       HW_ENEMY_AZURE_ADRA_BURST_WINDOW_MS: "2800"
+      HW_ENEMY_AZURE_LIGHT_BURST_WINDOW_MS: "9000"
+      HW_ENEMY_AZURE_MAIN_MIN_LEVEL: "20"
+      HW_WORSHIP_FAST_LOCAL: "1"
+      HW_WORSHIP_FRESH_STATE_MS: "750"
+      HW_RECOVER_FAIL_BASE_BACKOFF_MS: "8000"
+      HW_RECOVER_FAIL_MAX_BACKOFF_MS: "60000"
       HW_AZURE_PRE_CLOUD_DEBUFF_CAP: "4"
       HW_ENEMY_ULT_BOARD_REPORT: "1"
       # Default: isolate errors and keep later phases running. Set both to "1" only for CI gating.
@@ -152,7 +158,7 @@ jobs:
           cat logs/restore_status.tsv
           invalid=$(awk -F '\t' '$2 !~ /^ready:/ {count++} END {print count+0}' logs/restore_status.tsv)
           {
-            echo '## Task C v2.9.19 role-secret restore'
+            echo '## Task C v2.9.21 role-secret restore'
             echo
             echo '| Script | Status |'
             echo '|---|---|'
@@ -165,7 +171,7 @@ jobs:
           rm -rf .runtime-sync .runtime-debug
           mkdir -p .runtime-sync .runtime-debug logs
 
-      - name: Restore secret core bundle v2.9.19 LOW MDEF + BLUE RETURN
+      - name: Restore secret core bundle v2.9.21 RECOVERY + ORDERED ULT + LIGHT INSURANCE
         shell: bash
         env:
           HW_CORE_01: ${{ secrets.HW_CORE_01 }}
@@ -188,7 +194,7 @@ jobs:
 
           printf '%s%s%s' "$HW_CORE_01" "$HW_CORE_02" "$HW_CORE_03" > .runtime-secret/core.b64
           actual_b64_bytes=$(wc -c < .runtime-secret/core.b64 | tr -d ' ')
-          expected_b64_bytes="113412"
+          expected_b64_bytes="120180"
           if [ "$actual_b64_bytes" != "$expected_b64_bytes" ]; then
             echo "::error title=Secret core length mismatch::expected=$expected_b64_bytes actual=$actual_b64_bytes"
             exit 1
@@ -199,7 +205,7 @@ jobs:
             exit 1
           fi
           archive_sha=$(sha256sum .runtime-secret/core.tar.gz | awk '{print $1}')
-          expected_archive_sha="5e755b83a964f005cdf7256700e4c588a3e4fbdeab74b973af50d04221ecfa15"
+          expected_archive_sha="1982d7b004bd0777e27dd9bd82e6b1ec219747806e515d704f94d8197db4c126"
           if [ "$archive_sha" != "$expected_archive_sha" ]; then
             echo "::error title=Secret core SHA-256 mismatch::expected=$expected_archive_sha actual=$archive_sha"
             exit 1
@@ -230,16 +236,16 @@ jobs:
               exit 1
             fi
           }
-          verify_file preflight_roster.js "fae525669bc55cef1aefd5df275d7099cd5b228a222cf098a691e6adfcfb4e19"
-          verify_file phase_supervisor.js "0f62998dec1409d8bbbf3cbc704557714b877b787da6f7b227c5c7b378b2111d"
-          verify_file scripts/holywar_engine_v299.js "1efb13e23dc047224400d775afa1e16c9a1aed757c3f2492e5f26d13e17c7763"
-          verify_file scripts/holywar_policy_v299.js "86005913fd7033ec911943733e6abf5d226496608148f5e0e2e8f8b491ace726"
+          verify_file preflight_roster.js "8ed707454c209b4e3037907743cb0f50e5d1cd5a098a9fe1b4336f8ab6af858e"
+          verify_file phase_supervisor.js "39faa35af286a66bed9b0fe84bab4d0363e95975e4196f56a06ea39a22f4e2bb"
+          verify_file scripts/holywar_engine_v299.js "a5c24effad5788971aaa3ab7f4a57766b7a241972dab67df1d1e883bbb739465"
+          verify_file scripts/holywar_policy_v299.js "de6f0fe5c47670336a4b36a905f7c8ec7f0d8529c0b4076c30e431a91af3d864"
 
           node --check preflight_roster.js
           node --check scripts/holywar_policy_v299.js
           node --check scripts/holywar_engine_v299.js
           node --check phase_supervisor.js
-          grep -q "const VERSION = '2.9.19'" scripts/holywar_engine_v299.js
+          grep -q "const VERSION = '2.9.20'" scripts/holywar_engine_v299.js
           grep -q 'select\[name="sa_key"\]' preflight_roster.js
           grep -q 'candidateSelectCount' preflight_roster.js
           grep -q 'conflicting-member-overlap' preflight_roster.js
@@ -318,6 +324,25 @@ jobs:
           grep -q 'fallback REFUSED' scripts/holywar_engine_v299.js
           grep -q 'fail-closed-before-post' scripts/holywar_engine_v299.js
           grep -q 'ultimate-caster-down' scripts/holywar_engine_v299.js
+          # v2.9.21 live-RCA regression guards.
+          grep -q '/quest/_index' scripts/holywar_engine_v299.js
+          grep -q '/quest/_advance_frame' scripts/holywar_engine_v299.js
+          ! grep -q 'navigate(session.page, `${BASE}/quest`, `recover-quest' scripts/holywar_engine_v299.js
+          grep -q 'recoverBackoffRemaining' scripts/holywar_engine_v299.js
+          grep -q 'assigned ultimate priority' scripts/holywar_engine_v299.js
+          grep -q '次奥義担当待機: recovery/skill suppressed' scripts/holywar_engine_v299.js
+          grep -q 'planned ultimate LIVE visibility deferred' scripts/holywar_engine_v299.js
+          grep -q 'OUT-OF-ORDER' scripts/holywar_engine_v299.js
+          grep -q 'enemyAzureLightInsuranceAction' scripts/holywar_engine_v299.js
+          grep -q "enemyAzureLightPolicy:'HARD-SEAL-ALL-UNTIL-ENEMY-MAIN-AZURE'" preflight_roster.js
+          grep -q 'enemyAzureLightReservedShots' preflight_roster.js
+          ! grep -q 'HW_ENEMY_AZURE_LIGHT_RESERVE_CAP' preflight_roster.js
+          grep -q 'WORSHIP_FAST_LOCAL' scripts/holywar_engine_v299.js
+          grep -q "global: !WORSHIP_FAST_LOCAL, freshState: state" scripts/holywar_engine_v299.js
+          grep -q 'NONCOMBO_MYSTIC_MISSING: 神秘なし → 突撃へfail-soft' scripts/holywar_engine_v299.js
+          grep -q 'enemyMainAzureStatus' scripts/holywar_engine_v299.js
+          grep -q 'ALL Light Curtain hard-sealed until enemy MAIN Azure' scripts/holywar_engine_v299.js
+          grep -q 'externalLaunchGateReady' phase_supervisor.js
           node - <<'NODE'
           const fs=require('fs'),path=require('path'),assert=require('assert');
           // Static source-only audit of security and alias invariants; no network calls.
@@ -331,21 +356,84 @@ jobs:
           console.log('Audit-fix static gate: supervisor aliases + privacy + intel aging + board reservation verified.');
           NODE
 
+          # v2.9.21 Light hard-seal regression: ALL copies are reserved, and generic counters cannot spend them.
+          node - <<'NODE'
+          const fs=require('fs'),assert=require('assert');
+          const pre=require('./preflight_roster');
+          const policy=require('./scripts/holywar_policy_v299');
+          const rec=(profile,lv,role='')=>({profile,skills:[{key:`y56_${lv}`,name:'光の幕',level:lv,shots:1,wp:30}],memberships:[{phase:'soul',role:'attacker'},...(role?[{phase:'azure',role}]:[])]});
+          const plan=pre.buildResourcePlan([rec('a',22,'attacker'),rec('b',20,''),rec('c',25,'wall')]);
+          assert.equal(plan.policy.enemyAzureLightReserved,3);
+          assert.equal(plan.policy.enemyAzureLightReservedShots,3);
+          assert.equal(plan.policy.enemyAzureLightPolicy,'HARD-SEAL-ALL-UNTIL-ENEMY-MAIN-AZURE');
+          for(const id of ['a','b','c']){
+            const r=plan.profiles[id].late.enemyAzure.light; assert(r,`Light reserve missing ${id}`);
+            for(const phase of ['worship','soul','purgatory','hatred','azure']) assert.equal(policy.heldForAzure(plan.profiles[id],phase,{key:r.key,name:r.name,shots:1}),true,`Light leaked in ${phase}`);
+          }
+          const eng=fs.readFileSync('scripts/holywar_engine_v299.js','utf8');
+          const block=eng.slice(eng.indexOf('function chooseEnemyBuffCounter'),eng.indexOf('function timedSlotFile'));
+          assert(!block.includes("byName('光の幕')"),'generic anti-superbuff can still consume Light Curtain');
+          assert(eng.includes("kind = 'charge-fallback'"),'noncombo no-Mystic Charge fallback missing');
+          console.log('v2.9.21 Light hard seal + Worship fallback regression: PASS');
+          NODE
+
+          # Ordered-ultimate regression: no browser/network I/O; engine exports are exercised in HW_TEST_MODE.
+          node - <<'NODE'
+          const fs=require('fs'),os=require('os'),path=require('path'),assert=require('assert');
+          const enginePath=path.resolve('scripts/holywar_engine_v299.js');
+          const wr=(sync,name,data)=>{fs.mkdirSync(sync,{recursive:true});fs.writeFileSync(path.join(sync,name),JSON.stringify({at:Date.now(),...data}));};
+          const rd=(sync,name)=>JSON.parse(fs.readFileSync(path.join(sync,name),'utf8'));
+          async function load(phase,tag,sync){
+            process.env.SYNC_DIR=sync;process.env.HW_TEST_MODE='1';process.env.HW_ROLE_PHASE=phase;process.env.HW_ROLE_KIND='attacker';process.env.HW_ROLE_TAG=tag;
+            delete require.cache[require.resolve(enginePath)];return require(enginePath);
+          }
+          (async()=>{
+            { // External/manual Worship #1 must consume R1, then the next one is R2.
+              const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2920-w-')),e=await load('worship','RGW',sync);
+              wr(sync,'hw.obs.worship.a',{profile:'p1',current:{name:'崇拝の言葉',level:6,state:'PENDING',pendingSeconds:20,pendingTimerKnown:true},skills:[],arts:[]});
+              let st=await e.syncPhaseState();assert.equal(st.round,1);assert.equal(st.source,'external-or-manual');
+              wr(sync,'hw.obs.worship.a',{profile:'p1',current:{name:'',state:'NONE'},skills:[],arts:[]});
+              let raw=rd(sync,'hw.phase.worship');raw.lastSeenAt=Date.now()-10000;raw.endCandidateAt=Date.now()-5000;wr(sync,'hw.phase.worship',raw);
+              st=await e.syncPhaseState();assert.equal(st.running,false);
+              wr(sync,'hw.obs.worship.a',{profile:'p1',current:{name:'崇拝の言葉',level:6,state:'PENDING',pendingSeconds:20,pendingTimerKnown:true},skills:[],arts:[]});
+              st=await e.syncPhaseState();assert.equal(st.round,2);
+            }
+            { // Future-phase manual Soul before Worship completion is quarantined, never consumes Soul R1.
+              const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2920-s-')),e=await load('soul','RGS',sync);
+              wr(sync,'hw.obs.soul.a',{profile:'p1',current:{name:'魂の織り手',level:6,state:'PENDING'},skills:[],arts:[]});
+              let st=await e.syncPhaseState();assert.equal(st.round,0);assert.equal(st.quarantined,true);
+              wr(sync,'hw.phase.worship.done',{round:2});wr(sync,'hw.phase.worship.cleanup.done',{ok:true});
+              st=await e.syncPhaseState();assert.equal(st.round,0);assert.equal(st.quarantined,true);
+              wr(sync,'hw.obs.soul.a',{profile:'p1',current:{name:'',state:'NONE'},skills:[],arts:[]});await e.syncPhaseState();
+              wr(sync,'hw.obs.soul.a',{profile:'p1',current:{name:'魂の織り手',level:6,state:'PENDING'},skills:[],arts:[]});
+              st=await e.syncPhaseState();assert.equal(st.round,1);
+            }
+            { // An external ultimate may temporarily hide sa_key options; the preflight R1/R2 plan must survive.
+              const sync=fs.mkdtempSync(path.join(os.tmpdir(),'dc2920-a-')),e=await load('worship','RGA',sync);
+              wr(sync,'hw.roster.worship.attacker.x',{profile:'pA',account:'WA01',role:'attacker',arts:[],hasPossession:false});
+              wr(sync,'hw.roster.worship.attacker.y',{profile:'pB',account:'WA02',role:'attacker',arts:[],hasPossession:false});
+              wr(sync,'hw.global.assignments',{phases:{worship:[{round:1,profile:'pA',name:'崇拝の言葉',level:6,key:'super_art_4'},{round:2,profile:'pB',name:'崇拝の言葉',level:6,key:'super_art_4'}]}});
+              const plan=await e.buildAssignments();assert.equal(plan.assignments.length,2);assert.equal(plan.assignments[0].liveValidation,'deferred-until-cast');
+            }
+            console.log('v2.9.21 sequence regression: PASS');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+
           cat > logs/core_restore_status.json <<EOF
           {
-            "version": "2.9.19",
+            "version": "2.9.21",
             "source": "repository-secrets",
             "chunks": 3,
             "base64Bytes": $actual_b64_bytes,
             "archiveSha256": "$archive_sha",
-            "engineSha256": "1efb13e23dc047224400d775afa1e16c9a1aed757c3f2492e5f26d13e17c7763",
-            "preflightSha256": "fae525669bc55cef1aefd5df275d7099cd5b228a222cf098a691e6adfcfb4e19",
-            "supervisorSha256": "0f62998dec1409d8bbbf3cbc704557714b877b787da6f7b227c5c7b378b2111d",
-            "policySha256": "86005913fd7033ec911943733e6abf5d226496608148f5e0e2e8f8b491ace726"
+            "engineSha256": "a5c24effad5788971aaa3ab7f4a57766b7a241972dab67df1d1e883bbb739465",
+            "preflightSha256": "8ed707454c209b4e3037907743cb0f50e5d1cd5a098a9fe1b4336f8ab6af858e",
+            "supervisorSha256": "39faa35af286a66bed9b0fe84bab4d0363e95975e4196f56a06ea39a22f4e2bb",
+            "policySha256": "de6f0fe5c47670336a4b36a905f7c8ec7f0d8529c0b4076c30e431a91af3d864"
           }
           EOF
           echo "Secret core restored: 3 chunks, SHA-256 verified, 4/4 JavaScript syntax checks passed."
-          echo "Position policy: LOWEST MDEF ENTRY -> ONE SHOT -> LIVE BLUE RETURN (normal dropcast only)."
+          echo "Position policy: LOWEST MDEF ENTRY -> ONE SHOT -> LIVE BLUE RETURN. Recovery: /quest/_index route + backoff + ultimate-priority abort. Ultimate order: external/manual target consumes only the current ordered round; out-of-order future ultimates are quarantined. Light Curtain: HARD SEAL all copies until enemy MAIN Azure. Worship basics: account-local 2050ms fast lane, no guild-wide serialization."
 
       - name: Restore cached LIVE ultimate roster
         uses: actions/cache/restore@v4
@@ -403,13 +491,13 @@ jobs:
           const done=phases.filter(x=>fs.existsSync(path.join(sync,`hw.phase.${x}.done`)));
           const missing=phases.filter(x=>!done.includes(x));
           const failures=fs.existsSync(sync)?fs.readdirSync(sync).filter(x=>x.startsWith('hw.failure.')||x==='hw.supervisor.degraded'):[];
-          const result={version:'2.9.19',done,missing,failures,degraded:missing.length>0||failures.length>0,strict:process.env.HW_STRICT_FINAL==='1'};
+          const result={version:'2.9.20',done,missing,failures,degraded:missing.length>0||failures.length>0,strict:process.env.HW_STRICT_FINAL==='1'};
           fs.mkdirSync('logs',{recursive:true});
           fs.writeFileSync('logs/final_chain_status.json',JSON.stringify(result,null,2));
           console.log(JSON.stringify(result,null,2));
           if(process.env.GITHUB_STEP_SUMMARY){
             const rows=[
-              '## Task C v2.9.19 final status',
+              '## Task C v2.9.21 final status',
               '',
               `- Completed phases: ${done.join(', ') || '-'}`,
               `- Missing phases: ${missing.join(', ') || '-'}`,
