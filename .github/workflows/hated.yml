@@ -1,0 +1,130 @@
+name: Hated  script
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  script-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Install browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx playwright install --with-deps chromium
+
+      - name: Resolve script
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f hated_js ]; then
+            echo "SCRIPT=hated_js" >> "$GITHUB_ENV"
+          elif [ -f hated_js.js ]; then
+            echo "SCRIPT=hated_js.js" >> "$GITHUB_ENV"
+          else
+            echo "::error::Script file not found"
+            find . -maxdepth 2 -type f | sort
+            exit 1
+          fi
+
+      - name: Syntax check
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check "$SCRIPT"
+
+      - name: Run test
+        id: run_script
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+
+          mkdir -p artifacts
+
+          echo "=== start: $(date -u +'%Y-%m-%dT%H:%M:%SZ') ===" \
+            | tee artifacts/run.log
+
+          node "$SCRIPT" 2>&1 \
+            | tee -a artifacts/run.log
+
+          rc=${PIPESTATUS[0]}
+
+          echo "$rc" > artifacts/exit_code.txt
+
+          echo "=== exit code: $rc ===" \
+            | tee -a artifacts/run.log
+
+          exit "$rc"
+
+      - name: Extract scan results
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+
+          {
+            echo "=== scan related lines ==="
+
+            grep -E \
+              "deck scan|init mission:|deck:|prepared|key_level|PREBUILT|Raphael" \
+              artifacts/run.log || true
+
+          } | tee artifacts/scan_summary.txt
+
+      - name: Collect snapshots
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/snapshots
+
+          if [ -d war_html_snapshots ]; then
+            cp -a war_html_snapshots/. artifacts/snapshots/ || true
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: script-test-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Final status
+        if: always()
+        shell: bash
+        run: |
+          rc="unknown"
+
+          if [ -f artifacts/exit_code.txt ]; then
+            rc="$(cat artifacts/exit_code.txt)"
+          fi
+
+          echo "exit code: $rc"
