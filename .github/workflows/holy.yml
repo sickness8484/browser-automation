@@ -38,7 +38,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           umask 077
-          mkdir -p .pkg logs
+          mkdir -p .pkg logs .runtime-debug
           trap 'rm -rf .pkg' EXIT
           for k in PKG_01 PKG_02 PKG_03; do
             [ -n "${!k:-}" ] || { echo "::error title=Runtime package unavailable::one or more package segments are missing"; exit 1; }
@@ -66,8 +66,19 @@ jobs:
           UNIT_09: ${{ secrets.AZURE_ATTACKER_JS }}
           UNIT_10: ${{ secrets.AZURE_WALL_JS }}
         run: |
-          set -Eeuo pipefail
-          node ctl.js restore >/dev/null 2>&1 || { echo "::error title=Runtime initialization failed::unit or package validation failed; inspect diagnostics artifact"; exit 1; }
+          set +e
+          mkdir -p logs .runtime-debug
+          node ctl.js restore >.runtime-debug/restore.stdout.log 2>.runtime-debug/restore.stderr.log
+          code=$?
+          echo "$code" > logs/restore_exit.txt
+          if [ "$code" -ne 0 ]; then
+            cat .runtime-debug/restore.stdout.log .runtime-debug/restore.stderr.log > .runtime-debug/restore.raw.log 2>/dev/null || true
+            bytes="$(wc -c < .runtime-debug/restore.raw.log 2>/dev/null | tr -d ' ' || echo 0)"
+            fp="$(sha256sum .runtime-debug/restore.raw.log 2>/dev/null | awk '{print $1}' || true)"
+            printf 'code=LOAD_UNIT\nexit=%s\nbytes=%s\nfingerprint=%s\n' "$code" "$bytes" "${fp:-none}" > logs/restore_summary.txt
+            echo "::error title=Runtime initialization failed::code=LOAD_UNIT; exit=$code; diagnostics retained"
+            exit "$code"
+          fi
           echo "Units ready."
 
       - name: Restore state
@@ -83,13 +94,64 @@ jobs:
         shell: bash
         run: |
           set +e
-          node ctl.js pre >/dev/null 2>&1
+          mkdir -p logs .runtime-debug
+          : > .runtime-debug/init.stdout.log
+          : > .runtime-debug/init.stderr.log
+
+          node ctl.js pre >.runtime-debug/init.stdout.log 2>.runtime-debug/init.stderr.log
           code=$?
           echo "$code" > logs/init_exit.txt
+          cat .runtime-debug/init.stdout.log .runtime-debug/init.stderr.log > .runtime-debug/init.raw.log 2>/dev/null || true
+
+          INIT_EXIT="$code" node <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const p = '.runtime-debug/init.raw.log';
+          const raw = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+          const exitCode = Number(process.env.INIT_EXIT || 0);
+
+          const rules = [
+            ['DEPENDENCY', /MODULE_NOT_FOUND|Cannot find module|Executable doesn't exist|browser executable/i],
+            ['FILESYSTEM', /ENOENT|EACCES|EPERM|read-only file system|no such file/i],
+            ['NETWORK', /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|net::ERR_|\b429\b|\b502\b|\b503\b|\b504\b/i],
+            ['ACCESS', /\b401\b|\b403\b|unauthorized|forbidden|authentication failed|login required|session expired/i],
+            ['BROWSER', /playwright|chromium|browserType|Target page.*closed|browser has been closed|page\.goto|navigation failed/i],
+            ['TIMEOUT', /timeout|timed out|exceeded.*time/i],
+            ['VALIDATION', /validation|integrity|mismatch|required|invalid|missing|unexpected state/i],
+            ['STATE', /cache|restore state|state file|cursor state|checkpoint/i],
+          ];
+
+          let category = 'UNKNOWN';
+          for (const [name, re] of rules) {
+            if (re.test(raw)) { category = name; break; }
+          }
+
+          const digest = crypto.createHash('sha256').update(raw).digest('hex');
+          const summary = [
+            `code=INIT_${category}`,
+            `exit=${exitCode}`,
+            `bytes=${Buffer.byteLength(raw)}`,
+            `fingerprint=${digest}`,
+          ].join('\n') + '\n';
+          fs.writeFileSync('logs/init_summary.txt', summary);
+
+          // Artifact用。URL・資格情報らしい値・長いopaque値だけを伏せる。
+          let safe = raw
+            .replace(/https?:\/\/[^\s"'<>]+/gi, '[url]')
+            .replace(/((?:authorization|cookie|token|secret|session|authenticity)[^\r\n:=]{0,40}[:=]\s*)[^\r\n]+/gi, '$1[redacted]')
+            .replace(/\b[A-Fa-f0-9]{40,}\b/g, '[opaque]')
+            .replace(/\b[A-Za-z0-9_\-]{80,}\b/g, '[opaque]');
+          if (safe.length > 250000) safe = safe.slice(0, 250000) + '\n[truncated]\n';
+          fs.writeFileSync('.runtime-debug/init.sanitized.log', safe);
+          NODE
+
           if [ "$code" -ne 0 ]; then
-            echo "::error title=Initialization failed::details were retained in the diagnostics artifact"
+            diag="$(sed -n 's/^code=//p' logs/init_summary.txt | head -n1)"
+            bytes="$(sed -n 's/^bytes=//p' logs/init_summary.txt | head -n1)"
+            echo "::error title=Initialization failed::code=${diag:-INIT_UNKNOWN}; exit=$code; diagnostic-bytes=${bytes:-0}; inspect artifact"
             exit "$code"
           fi
+
           echo "Initialization complete."
 
       - name: Save state
@@ -104,9 +166,14 @@ jobs:
         shell: bash
         run: |
           set +e
-          node ctl.js run >/dev/null 2>&1
+          mkdir -p logs .runtime-debug
+          node ctl.js run >.runtime-debug/run.stdout.log 2>.runtime-debug/run.stderr.log
           code=$?
           echo "$code" > logs/run_exit.txt
+          cat .runtime-debug/run.stdout.log .runtime-debug/run.stderr.log > .runtime-debug/run.raw.log 2>/dev/null || true
+          bytes="$(wc -c < .runtime-debug/run.raw.log 2>/dev/null | tr -d ' ' || echo 0)"
+          fp="$(sha256sum .runtime-debug/run.raw.log 2>/dev/null | awk '{print $1}' || true)"
+          printf 'code=RUN_%s\nexit=%s\nbytes=%s\nfingerprint=%s\n' "$([ "$code" -eq 0 ] && echo OK || echo FAILED)" "$code" "$bytes" "${fp:-none}" > logs/run_summary.txt
           echo "Execution finished with status $code."
           exit 0
 
@@ -115,7 +182,8 @@ jobs:
         shell: bash
         run: |
           set +e
-          [ -f ctl.js ] && node ctl.js post >/dev/null 2>&1
+          mkdir -p logs .runtime-debug
+          [ -f ctl.js ] && node ctl.js post >.runtime-debug/post.stdout.log 2>.runtime-debug/post.stderr.log
           if [ -f logs/status.json ]; then
             node -e "const x=require('./logs/status.json'); console.log('Completed '+x.completed+'/'+x.total+'; issues='+x.failureCount)"
           else
