@@ -12,25 +12,254 @@ concurrency:
 
 jobs:
   run:
-    runs-on: ubuntu-latest
+    # latest の環境更新による揺れを避けるため固定
+    runs-on: ubuntu-22.04
+
     timeout-minutes: 150
 
+    env:
+      CI: "true"
+      PLAYWRIGHT_BROWSERS_PATH: "${{ github.workspace }}/.cache/ms-playwright"
+
     steps:
+      # ============================================================
+      # 1. Node.js
+      # ============================================================
+
       - name: Prepare runtime
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Install browser runtime
+      # ============================================================
+      # 2. Playwright package
+      # ============================================================
+
+      - name: Prepare Playwright package
         shell: bash
+        timeout-minutes: 5
         run: |
           set -Eeuo pipefail
-          npm init -y >/dev/null 2>&1
-          npm install --no-save playwright >/dev/null 2>&1
-          npx playwright install --with-deps chromium >/dev/null 2>&1
+
+          echo "::group::Initialize npm"
+          npm init -y >/dev/null
+          echo "::endgroup::"
+
+          echo "::group::Install Playwright package"
+
+          for attempt in 1 2 3; do
+            echo "Playwright npm install attempt ${attempt}/3"
+
+            if timeout 180s npm install \
+              --no-save \
+              --no-audit \
+              --no-fund \
+              playwright; then
+
+              echo "Playwright package installed."
+              break
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error title=Playwright package installation failed::npm install failed after 3 attempts"
+              exit 1
+            fi
+
+            sleep $((attempt * 5))
+          done
+
+          node -e "
+            const p = require('playwright/package.json');
+            console.log('Playwright version:', p.version);
+          "
+
+          echo "::endgroup::"
+
+      # ============================================================
+      # 3. Browser cache
+      # ============================================================
+
+      - name: Restore browser cache
+        id: browser-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('node_modules/playwright/package.json') }}
+          restore-keys: |
+            playwright-chromium-${{ runner.os }}-${{ runner.arch }}-
+
+      # ============================================================
+      # 4. Chromium
+      #
+      # 最初から --with-deps は使わない。
+      # Browser install → launch test →
+      # 必要な場合だけ Linux dependencies を入れる。
+      # ============================================================
+
+      - name: Install browser runtime
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          set -Eeuo pipefail
+
+          mkdir -p \
+            "$PLAYWRIGHT_BROWSERS_PATH" \
+            logs \
+            .runtime-debug
+
+          echo "Browser cache hit: ${{ steps.browser-cache.outputs.cache-hit }}"
+
+          echo "::group::Install Chromium"
+
+          installed=0
+
+          for attempt in 1 2 3; do
+            echo "Chromium installation attempt ${attempt}/3"
+
+            if timeout 300s npx playwright install chromium; then
+              installed=1
+              break
+            fi
+
+            echo "::warning title=Chromium installation retry::attempt ${attempt}/3 failed or timed out"
+
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 10))
+            fi
+          done
+
+          if [ "$installed" -ne 1 ]; then
+            echo "::error title=Chromium installation failed::browser download failed after 3 attempts"
+            exit 1
+          fi
+
+          echo "::endgroup::"
+
+          echo "::group::Verify Chromium"
+
+          set +e
+
+          timeout 60s node <<'NODE'
+          const { chromium } = require('playwright');
+
+          (async () => {
+            const start = Date.now();
+
+            const browser = await chromium.launch({
+              headless: true,
+              args: [
+                '--disable-dev-shm-usage'
+              ]
+            });
+
+            const page = await browser.newPage();
+
+            await page.setContent(
+              '<!doctype html><html><body>runtime-ok</body></html>'
+            );
+
+            const text = await page.textContent('body');
+
+            if (text !== 'runtime-ok') {
+              throw new Error(`Unexpected browser verification result: ${text}`);
+            }
+
+            await browser.close();
+
+            console.log(
+              `Chromium launch verification OK (${Date.now() - start} ms)`
+            );
+          })().catch(err => {
+            console.error(err);
+            process.exit(1);
+          });
+          NODE
+
+          verify_code=$?
+
+          set -e
+
+          echo "::endgroup::"
+
+          # --------------------------------------------------------
+          # Chromium自体は取得できたが共有ライブラリ不足などで起動できない場合だけ
+          # Linux dependency installationを行う。
+          # --------------------------------------------------------
+
+          if [ "$verify_code" -ne 0 ]; then
+
+            echo "::warning title=Chromium dependency fallback::initial browser launch failed; installing Linux dependencies"
+
+            echo "::group::Install Chromium system dependencies"
+
+            if ! timeout 420s npx playwright install-deps chromium; then
+              echo "::error title=Browser dependency installation failed::playwright install-deps failed or timed out"
+              exit 1
+            fi
+
+            echo "::endgroup::"
+
+            echo "::group::Verify Chromium after dependency install"
+
+            timeout 60s node <<'NODE'
+            const { chromium } = require('playwright');
+
+            (async () => {
+              const start = Date.now();
+
+              const browser = await chromium.launch({
+                headless: true,
+                args: [
+                  '--disable-dev-shm-usage'
+                ]
+              });
+
+              const page = await browser.newPage();
+
+              await page.setContent(
+                '<!doctype html><html><body>runtime-ok</body></html>'
+              );
+
+              const text = await page.textContent('body');
+
+              if (text !== 'runtime-ok') {
+                throw new Error(`Unexpected browser verification result: ${text}`);
+              }
+
+              await browser.close();
+
+              console.log(
+                `Chromium launch verification OK after dependency install (${Date.now() - start} ms)`
+              );
+            })().catch(err => {
+              console.error(err);
+              process.exit(1);
+            });
+            NODE
+
+            echo "::endgroup::"
+          fi
+
+          echo "Browser runtime ready."
+
+      # ============================================================
+      # 5. Save Chromium cache
+      # ============================================================
+
+      - name: Save browser cache
+        if: ${{ success() && steps.browser-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('node_modules/playwright/package.json') }}
+
+      # ============================================================
+      # 6. Reconstruct encrypted/runtime package from GitHub Secrets
+      # ============================================================
 
       - name: Load package
         shell: bash
+        timeout-minutes: 5
         env:
           PKG_01: ${{ secrets.PKG_01 }}
           PKG_02: ${{ secrets.PKG_02 }}
@@ -38,22 +267,100 @@ jobs:
         run: |
           set -Eeuo pipefail
           umask 077
+
           mkdir -p .pkg logs .runtime-debug
-          trap 'rm -rf .pkg' EXIT
+
+          cleanup_pkg() {
+            rm -rf .pkg
+          }
+
+          trap cleanup_pkg EXIT
+
+          echo "Validating package segments..."
+
           for k in PKG_01 PKG_02 PKG_03; do
-            [ -n "${!k:-}" ] || { echo "::error title=Runtime package unavailable::one or more package segments are missing"; exit 1; }
+            if [ -z "${!k:-}" ]; then
+              echo "::error title=Runtime package unavailable::secret ${k} is missing or empty"
+              exit 1
+            fi
           done
-          printf '%s%s%s' "$PKG_01" "$PKG_02" "$PKG_03" > .pkg/payload.b64
-          [ "$(wc -c < .pkg/payload.b64 | tr -d ' ')" = "133768" ] || { echo "::error title=Runtime package invalid::length check failed"; exit 1; }
-          base64 --decode .pkg/payload.b64 > .pkg/payload.bin
-          actual="$(sha256sum .pkg/payload.bin | awk '{print $1}')"
-          [ "$actual" = "9bc4904f0c354fcd3e9b1420e7012eab21fd24e8dc2e0ebfa6a664f66d9ca9be" ] || { echo "::error title=Runtime package invalid::integrity check failed"; exit 1; }
-          tar -xzf .pkg/payload.bin -C "$GITHUB_WORKSPACE"
-          node --check ctl.js >/dev/null
+
+          echo "Joining package segments..."
+
+          printf '%s%s%s' \
+            "$PKG_01" \
+            "$PKG_02" \
+            "$PKG_03" \
+            > .pkg/payload.b64
+
+          actual_length="$(
+            wc -c < .pkg/payload.b64 |
+            tr -d '[:space:]'
+          )"
+
+          expected_length="133768"
+
+          if [ "$actual_length" != "$expected_length" ]; then
+            echo "::error title=Runtime package invalid::length check failed; expected=${expected_length}; actual=${actual_length}"
+            exit 1
+          fi
+
+          echo "Package length OK."
+
+          echo "Decoding package..."
+
+          if ! base64 --decode \
+            .pkg/payload.b64 \
+            > .pkg/payload.bin; then
+
+            echo "::error title=Runtime package invalid::base64 decoding failed"
+            exit 1
+          fi
+
+          echo "Checking package integrity..."
+
+          actual_sha="$(
+            sha256sum .pkg/payload.bin |
+            awk '{print $1}'
+          )"
+
+          expected_sha="9bc4904f0c354fcd3e9b1420e7012eab21fd24e8dc2e0ebfa6a664f66d9ca9be"
+
+          if [ "$actual_sha" != "$expected_sha" ]; then
+            echo "::error title=Runtime package invalid::integrity check failed"
+            exit 1
+          fi
+
+          echo "Package integrity OK."
+
+          echo "Extracting package..."
+
+          if ! tar \
+            -xzf .pkg/payload.bin \
+            -C "$GITHUB_WORKSPACE"; then
+
+            echo "::error title=Runtime package invalid::archive extraction failed"
+            exit 1
+          fi
+
+          if [ ! -f ctl.js ]; then
+            echo "::error title=Runtime package invalid::ctl.js was not produced"
+            exit 1
+          fi
+
+          echo "Checking controller syntax..."
+
+          node --check ctl.js
+
           echo "Package ready."
+
+      # ============================================================
+      # 7. Load JS units from secrets
+      # ============================================================
 
       - name: Load units
         shell: bash
+        timeout-minutes: 10
         env:
           UNIT_01: ${{ secrets.COMBO_SUHAI_JS }}
           UNIT_02: ${{ secrets.NOCOMBO_SUHAI_JS }}
@@ -67,21 +374,68 @@ jobs:
           UNIT_10: ${{ secrets.AZURE_WALL_JS }}
         run: |
           set +e
+
           mkdir -p logs .runtime-debug
-          node ctl.js restore >.runtime-debug/restore.stdout.log 2>.runtime-debug/restore.stderr.log
+
+          : > .runtime-debug/restore.stdout.log
+          : > .runtime-debug/restore.stderr.log
+
+          timeout 540s node ctl.js restore \
+            > .runtime-debug/restore.stdout.log \
+            2> .runtime-debug/restore.stderr.log
+
           code=$?
+
           echo "$code" > logs/restore_exit.txt
+
+          cat \
+            .runtime-debug/restore.stdout.log \
+            .runtime-debug/restore.stderr.log \
+            > .runtime-debug/restore.raw.log \
+            2>/dev/null || true
+
           if [ "$code" -ne 0 ]; then
-            cat .runtime-debug/restore.stdout.log .runtime-debug/restore.stderr.log > .runtime-debug/restore.raw.log 2>/dev/null || true
-            bytes="$(wc -c < .runtime-debug/restore.raw.log 2>/dev/null | tr -d ' ' || echo 0)"
-            fp="$(sha256sum .runtime-debug/restore.raw.log 2>/dev/null | awk '{print $1}' || true)"
-            printf 'code=LOAD_UNIT\nexit=%s\nbytes=%s\nfingerprint=%s\n' "$code" "$bytes" "${fp:-none}" > logs/restore_summary.txt
+
+            bytes="$(
+              wc -c \
+                < .runtime-debug/restore.raw.log \
+                2>/dev/null |
+              tr -d '[:space:]'
+            )"
+
+            fp="$(
+              sha256sum \
+                .runtime-debug/restore.raw.log \
+                2>/dev/null |
+              awk '{print $1}'
+            )"
+
+            printf \
+              'code=LOAD_UNIT\nexit=%s\nbytes=%s\nfingerprint=%s\n' \
+              "$code" \
+              "${bytes:-0}" \
+              "${fp:-none}" \
+              > logs/restore_summary.txt
+
             echo "::error title=Runtime initialization failed::code=LOAD_UNIT; exit=$code; diagnostics retained"
+
             exit "$code"
           fi
+
           echo "Units ready."
 
+      # ============================================================
+      # 8. Restore runtime state
+      # ============================================================
+
+      - name: Prepare state directory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .state/cache
+
       - name: Restore state
+        id: state-restore
         uses: actions/cache/restore@v4
         with:
           path: .state/cache
@@ -89,70 +443,176 @@ jobs:
           restore-keys: |
             runtime-state-${{ github.ref_name }}-
 
+      # ============================================================
+      # 9. Initialize
+      # ============================================================
+
       - name: Initialize
         id: init
         shell: bash
+        timeout-minutes: 20
         run: |
           set +e
-          mkdir -p logs .runtime-debug
+
+          mkdir -p \
+            logs \
+            .runtime-debug \
+            .state/cache
+
           : > .runtime-debug/init.stdout.log
           : > .runtime-debug/init.stderr.log
 
-          node ctl.js pre >.runtime-debug/init.stdout.log 2>.runtime-debug/init.stderr.log
+          timeout 1140s node ctl.js pre \
+            > .runtime-debug/init.stdout.log \
+            2> .runtime-debug/init.stderr.log
+
           code=$?
+
           echo "$code" > logs/init_exit.txt
-          cat .runtime-debug/init.stdout.log .runtime-debug/init.stderr.log > .runtime-debug/init.raw.log 2>/dev/null || true
+
+          cat \
+            .runtime-debug/init.stdout.log \
+            .runtime-debug/init.stderr.log \
+            > .runtime-debug/init.raw.log \
+            2>/dev/null || true
 
           INIT_EXIT="$code" node <<'NODE'
           const fs = require('fs');
           const crypto = require('crypto');
-          const p = '.runtime-debug/init.raw.log';
-          const raw = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+
+          const source = '.runtime-debug/init.raw.log';
+
+          const raw = fs.existsSync(source)
+            ? fs.readFileSync(source, 'utf8')
+            : '';
+
           const exitCode = Number(process.env.INIT_EXIT || 0);
 
           const rules = [
-            ['DEPENDENCY', /MODULE_NOT_FOUND|Cannot find module|Executable doesn't exist|browser executable/i],
-            ['FILESYSTEM', /ENOENT|EACCES|EPERM|read-only file system|no such file/i],
-            ['NETWORK', /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|net::ERR_|\b429\b|\b502\b|\b503\b|\b504\b/i],
-            ['ACCESS', /\b401\b|\b403\b|unauthorized|forbidden|authentication failed|login required|session expired/i],
-            ['BROWSER', /playwright|chromium|browserType|Target page.*closed|browser has been closed|page\.goto|navigation failed/i],
-            ['TIMEOUT', /timeout|timed out|exceeded.*time/i],
-            ['VALIDATION', /validation|integrity|mismatch|required|invalid|missing|unexpected state/i],
-            ['STATE', /cache|restore state|state file|cursor state|checkpoint/i],
+            [
+              'DEPENDENCY',
+              /MODULE_NOT_FOUND|Cannot find module|Executable doesn't exist|browser executable/i
+            ],
+            [
+              'FILESYSTEM',
+              /ENOENT|EACCES|EPERM|read-only file system|no such file/i
+            ],
+            [
+              'NETWORK',
+              /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|net::ERR_|\b429\b|\b502\b|\b503\b|\b504\b/i
+            ],
+            [
+              'ACCESS',
+              /\b401\b|\b403\b|unauthorized|forbidden|authentication failed|login required|session expired/i
+            ],
+            [
+              'BROWSER',
+              /playwright|chromium|browserType|Target page.*closed|browser has been closed|page\.goto|navigation failed/i
+            ],
+            [
+              'TIMEOUT',
+              /timeout|timed out|exceeded.*time/i
+            ],
+            [
+              'VALIDATION',
+              /validation|integrity|mismatch|required|invalid|missing|unexpected state/i
+            ],
+            [
+              'STATE',
+              /cache|restore state|state file|cursor state|checkpoint/i
+            ],
           ];
 
           let category = 'UNKNOWN';
+
           for (const [name, re] of rules) {
-            if (re.test(raw)) { category = name; break; }
+            if (re.test(raw)) {
+              category = name;
+              break;
+            }
           }
 
-          const digest = crypto.createHash('sha256').update(raw).digest('hex');
+          const digest = crypto
+            .createHash('sha256')
+            .update(raw)
+            .digest('hex');
+
           const summary = [
             `code=INIT_${category}`,
             `exit=${exitCode}`,
             `bytes=${Buffer.byteLength(raw)}`,
             `fingerprint=${digest}`,
           ].join('\n') + '\n';
-          fs.writeFileSync('logs/init_summary.txt', summary);
 
-          // Artifact用。URL・資格情報らしい値・長いopaque値だけを伏せる。
+          fs.writeFileSync(
+            'logs/init_summary.txt',
+            summary
+          );
+
+          // ------------------------------------------------------
+          // Artifact用sanitization
+          // ------------------------------------------------------
+
           let safe = raw
-            .replace(/https?:\/\/[^\s"'<>]+/gi, '[url]')
-            .replace(/((?:authorization|cookie|token|secret|session|authenticity)[^\r\n:=]{0,40}[:=]\s*)[^\r\n]+/gi, '$1[redacted]')
-            .replace(/\b[A-Fa-f0-9]{40,}\b/g, '[opaque]')
-            .replace(/\b[A-Za-z0-9_\-]{80,}\b/g, '[opaque]');
-          if (safe.length > 250000) safe = safe.slice(0, 250000) + '\n[truncated]\n';
-          fs.writeFileSync('.runtime-debug/init.sanitized.log', safe);
+            .replace(
+              /https?:\/\/[^\s"'<>]+/gi,
+              '[url]'
+            )
+            .replace(
+              /((?:authorization|cookie|token|secret|session|authenticity)[^\r\n:=]{0,40}[:=]\s*)[^\r\n]+/gi,
+              '$1[redacted]'
+            )
+            .replace(
+              /\b[A-Fa-f0-9]{40,}\b/g,
+              '[opaque]'
+            )
+            .replace(
+              /\b[A-Za-z0-9_\-]{80,}\b/g,
+              '[opaque]'
+            );
+
+          if (safe.length > 250000) {
+            safe =
+              safe.slice(0, 250000) +
+              '\n[truncated]\n';
+          }
+
+          fs.writeFileSync(
+            '.runtime-debug/init.sanitized.log',
+            safe
+          );
           NODE
 
           if [ "$code" -ne 0 ]; then
-            diag="$(sed -n 's/^code=//p' logs/init_summary.txt | head -n1)"
-            bytes="$(sed -n 's/^bytes=//p' logs/init_summary.txt | head -n1)"
-            echo "::error title=Initialization failed::code=${diag:-INIT_UNKNOWN}; exit=$code; diagnostic-bytes=${bytes:-0}; inspect artifact"
+
+            diag="$(
+              sed -n \
+                's/^code=//p' \
+                logs/init_summary.txt |
+              head -n1
+            )"
+
+            bytes="$(
+              sed -n \
+                's/^bytes=//p' \
+                logs/init_summary.txt |
+              head -n1
+            )"
+
+            if [ "$code" -eq 124 ]; then
+              echo "::error title=Initialization timed out::ctl.js pre exceeded step timeout"
+            else
+              echo "::error title=Initialization failed::code=${diag:-INIT_UNKNOWN}; exit=$code; diagnostic-bytes=${bytes:-0}; inspect artifact"
+            fi
+
             exit "$code"
           fi
 
           echo "Initialization complete."
+
+      # ============================================================
+      # 10. Persist state
+      # ============================================================
 
       - name: Save state
         if: ${{ steps.init.outcome == 'success' }}
@@ -161,35 +621,135 @@ jobs:
           path: .state/cache
           key: runtime-state-${{ github.ref_name }}-${{ github.run_id }}
 
+      # ============================================================
+      # 11. Execute
+      # ============================================================
+
       - name: Execute
+        id: execute
         continue-on-error: true
         shell: bash
+        timeout-minutes: 100
         run: |
           set +e
+
           mkdir -p logs .runtime-debug
-          node ctl.js run >.runtime-debug/run.stdout.log 2>.runtime-debug/run.stderr.log
+
+          : > .runtime-debug/run.stdout.log
+          : > .runtime-debug/run.stderr.log
+
+          timeout 5940s node ctl.js run \
+            > .runtime-debug/run.stdout.log \
+            2> .runtime-debug/run.stderr.log
+
           code=$?
+
           echo "$code" > logs/run_exit.txt
-          cat .runtime-debug/run.stdout.log .runtime-debug/run.stderr.log > .runtime-debug/run.raw.log 2>/dev/null || true
-          bytes="$(wc -c < .runtime-debug/run.raw.log 2>/dev/null | tr -d ' ' || echo 0)"
-          fp="$(sha256sum .runtime-debug/run.raw.log 2>/dev/null | awk '{print $1}' || true)"
-          printf 'code=RUN_%s\nexit=%s\nbytes=%s\nfingerprint=%s\n' "$([ "$code" -eq 0 ] && echo OK || echo FAILED)" "$code" "$bytes" "${fp:-none}" > logs/run_summary.txt
-          echo "Execution finished with status $code."
+
+          cat \
+            .runtime-debug/run.stdout.log \
+            .runtime-debug/run.stderr.log \
+            > .runtime-debug/run.raw.log \
+            2>/dev/null || true
+
+          bytes="$(
+            wc -c \
+              < .runtime-debug/run.raw.log \
+              2>/dev/null |
+            tr -d '[:space:]'
+          )"
+
+          fp="$(
+            sha256sum \
+              .runtime-debug/run.raw.log \
+              2>/dev/null |
+            awk '{print $1}'
+          )"
+
+          if [ "$code" -eq 0 ]; then
+            run_status="OK"
+          elif [ "$code" -eq 124 ]; then
+            run_status="TIMEOUT"
+          else
+            run_status="FAILED"
+          fi
+
+          printf \
+            'code=RUN_%s\nexit=%s\nbytes=%s\nfingerprint=%s\n' \
+            "$run_status" \
+            "$code" \
+            "${bytes:-0}" \
+            "${fp:-none}" \
+            > logs/run_summary.txt
+
+          echo "Execution finished with status ${code} (${run_status})."
+
+          # Executeの失敗自体では後処理・artifact uploadを止めない
           exit 0
+
+      # ============================================================
+      # 12. Finalize
+      # ============================================================
 
       - name: Finalize
         if: always()
         shell: bash
+        timeout-minutes: 10
         run: |
           set +e
+
           mkdir -p logs .runtime-debug
-          [ -f ctl.js ] && node ctl.js post >.runtime-debug/post.stdout.log 2>.runtime-debug/post.stderr.log
+
+          if [ -f ctl.js ]; then
+
+            timeout 540s node ctl.js post \
+              > .runtime-debug/post.stdout.log \
+              2> .runtime-debug/post.stderr.log
+
+            post_code=$?
+
+            echo "$post_code" > logs/post_exit.txt
+
+            if [ "$post_code" -eq 124 ]; then
+              echo "::warning title=Finalize timeout::ctl.js post exceeded timeout"
+            elif [ "$post_code" -ne 0 ]; then
+              echo "::warning title=Finalize failed::ctl.js post exit=${post_code}"
+            fi
+          fi
+
           if [ -f logs/status.json ]; then
-            node -e "const x=require('./logs/status.json'); console.log('Completed '+x.completed+'/'+x.total+'; issues='+x.failureCount)"
+
+            node <<'NODE'
+            try {
+              const fs = require('fs');
+
+              const x = JSON.parse(
+                fs.readFileSync(
+                  'logs/status.json',
+                  'utf8'
+                )
+              );
+
+              console.log(
+                `Completed ${x.completed ?? '?'} / ${x.total ?? '?'}; issues=${x.failureCount ?? '?'}`
+              );
+            } catch (err) {
+              console.log(
+                'status.json exists but could not be parsed:',
+                err.message
+              );
+            }
+            NODE
+
           else
             echo "Status unavailable; inspect diagnostics."
           fi
+
           true
+
+      # ============================================================
+      # 13. Upload diagnostics
+      # ============================================================
 
       - name: Upload diagnostics
         if: always()
@@ -204,11 +764,23 @@ jobs:
           retention-days: 14
           include-hidden-files: true
 
+      # ============================================================
+      # 14. Cleanup
+      # ============================================================
+
       - name: Cleanup
         if: always()
         shell: bash
+        timeout-minutes: 5
         run: |
           set +e
-          [ -f ctl.js ] && node ctl.js cleanup >/dev/null 2>&1 || true
+
+          if [ -f ctl.js ]; then
+            timeout 240s node ctl.js cleanup \
+              >/dev/null \
+              2>&1 || true
+          fi
+
           rm -rf .pkg
+
           true
