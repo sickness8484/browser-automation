@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 jobs:
-  script-test:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -21,47 +21,47 @@ jobs:
           node-version: '24'
           package-manager-cache: false
 
-      - name: Resolve script
+      - name: Restore script
         shell: bash
+        env:
+          SCRIPT_BODY: ${{ secrets.hated_js }}
         run: |
           set -euo pipefail
 
-          if [ -f hated_js ]; then
-            echo "SCRIPT=hated_js" >> "$GITHUB_ENV"
-          elif [ -f hated_js.js ]; then
-            echo "SCRIPT=hated_js.js" >> "$GITHUB_ENV"
-          else
-            echo "::error::Script file not found"
-            find . -maxdepth 3 -type f | sort
+          if [ -z "$SCRIPT_BODY" ]; then
+            echo "::error::Required secret is empty or not available"
             exit 1
           fi
+
+          printf '%s' "$SCRIPT_BODY" > script.js
+
+          echo "script restored"
+          echo "bytes: $(wc -c < script.js)"
+          echo "lines: $(wc -l < script.js)"
 
       - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ -f package.json ]; then
-            npm install
-          else
-            npm init -y
-            npm install playwright
-          fi
+          npm init -y >/dev/null 2>&1
+          npm install playwright
 
       - name: Install browser
         shell: bash
         run: |
           set -euo pipefail
+
           npx playwright install --with-deps chromium
 
       - name: Syntax check
         shell: bash
         run: |
           set -euo pipefail
-          node --check "$SCRIPT"
+
+          node --check script.js
 
       - name: Run test
-        id: run_script
         continue-on-error: true
         shell: bash
         run: |
@@ -69,10 +69,10 @@ jobs:
 
           mkdir -p artifacts
 
-          echo "=== start: $(date -u +'%Y-%m-%dT%H:%M:%SZ') ===" \
+          echo "=== start ===" \
             | tee artifacts/run.log
 
-          node "$SCRIPT" 2>&1 \
+          node script.js 2>&1 \
             | tee -a artifacts/run.log
 
           rc=${PIPESTATUS[0]}
@@ -91,10 +91,10 @@ jobs:
           mkdir -p artifacts
 
           {
-            echo "=== scan related lines ==="
+            echo "=== scan results ==="
 
             grep -E \
-              "deck scan|init mission:|deck:|prepared|key_level|PREBUILT|Raphael|BOOT|PREFLIGHT" \
+              "deck scan|deck:|init mission:|prepared|key_level|PREBUILT|PREFLIGHT|BOOT|front:|back:" \
               artifacts/run.log || true
 
           } | tee artifacts/scan_summary.txt
@@ -109,11 +109,11 @@ jobs:
             cp -a war_html_snapshots/. artifacts/snapshots/ || true
           fi
 
-      - name: Upload artifacts
+      - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: script-test-${{ github.run_number }}
+          name: test-result-${{ github.run_number }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 7
@@ -122,10 +122,8 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rc="unknown"
-
           if [ -f artifacts/exit_code.txt ]; then
-            rc="$(cat artifacts/exit_code.txt)"
+            echo "exit code: $(cat artifacts/exit_code.txt)"
+          else
+            echo "exit code: unavailable"
           fi
-
-          echo "exit code: $rc"
