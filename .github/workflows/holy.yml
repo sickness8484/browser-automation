@@ -55,16 +55,16 @@ jobs:
       - name: Load units
         shell: bash
         env:
-          UNIT_01: ${{ secrets.UNIT_01 }}
-          UNIT_02: ${{ secrets.UNIT_02 }}
-          UNIT_03: ${{ secrets.UNIT_03 }}
-          UNIT_04: ${{ secrets.UNIT_04 }}
-          UNIT_05: ${{ secrets.UNIT_05 }}
-          UNIT_06: ${{ secrets.UNIT_06 }}
-          UNIT_07: ${{ secrets.UNIT_07 }}
-          UNIT_08: ${{ secrets.UNIT_08 }}
-          UNIT_09: ${{ secrets.UNIT_09 }}
-          UNIT_10: ${{ secrets.UNIT_10 }}
+          UNIT_01: ${{ secrets.COMBO_SUHAI_JS }}
+          UNIT_02: ${{ secrets.NOCOMBO_SUHAI_JS }}
+          UNIT_03: ${{ secrets.ATTACKER_YELLOW_JS }}
+          UNIT_04: ${{ secrets.WALL_YELLOW_JS }}
+          UNIT_05: ${{ secrets.PURGATORY_ATTACKER_JS }}
+          UNIT_06: ${{ secrets.PURGATORY_WALL_JS }}
+          UNIT_07: ${{ secrets.HATRED_ATTACKER_JS }}
+          UNIT_08: ${{ secrets.HATRED_WALL_JS }}
+          UNIT_09: ${{ secrets.AZURE_ATTACKER_JS }}
+          UNIT_10: ${{ secrets.AZURE_WALL_JS }}
         run: |
           set -Eeuo pipefail
           node ctl.js restore >/dev/null 2>&1 || { echo "::error title=Runtime initialization failed::unit or package validation failed; inspect diagnostics artifact"; exit 1; }
