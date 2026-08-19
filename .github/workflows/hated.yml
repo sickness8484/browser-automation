@@ -1,4 +1,4 @@
-name: Hated  script
+name: Script Test
 
 on:
   workflow_dispatch:
@@ -13,30 +13,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '22'
-          cache: npm
-
-      - name: Install dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
-
-      - name: Install browser
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx playwright install --with-deps chromium
+          node-version: '24'
+          package-manager-cache: false
 
       - name: Resolve script
         shell: bash
@@ -49,9 +32,27 @@ jobs:
             echo "SCRIPT=hated_js.js" >> "$GITHUB_ENV"
           else
             echo "::error::Script file not found"
-            find . -maxdepth 2 -type f | sort
+            find . -maxdepth 3 -type f | sort
             exit 1
           fi
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f package.json ]; then
+            npm install
+          else
+            npm init -y
+            npm install playwright
+          fi
+
+      - name: Install browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx playwright install --with-deps chromium
 
       - name: Syntax check
         shell: bash
@@ -93,7 +94,7 @@ jobs:
             echo "=== scan related lines ==="
 
             grep -E \
-              "deck scan|init mission:|deck:|prepared|key_level|PREBUILT|Raphael" \
+              "deck scan|init mission:|deck:|prepared|key_level|PREBUILT|Raphael|BOOT|PREFLIGHT" \
               artifacts/run.log || true
 
           } | tee artifacts/scan_summary.txt
