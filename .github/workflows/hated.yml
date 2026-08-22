@@ -1,4 +1,4 @@
-name: Script Test
+name: Hated script
 
 on:
   workflow_dispatch:
