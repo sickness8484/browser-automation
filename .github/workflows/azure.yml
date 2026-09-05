@@ -1,0 +1,129 @@
+name: Azure script
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Restore script
+        shell: bash
+        env:
+          SCRIPT_BODY: ${{ secrets.azure_js }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$SCRIPT_BODY" ]; then
+            echo "::error::Required secret is empty or not available"
+            exit 1
+          fi
+
+          printf '%s' "$SCRIPT_BODY" > script.js
+
+          echo "script restored"
+          echo "bytes: $(wc -c < script.js)"
+          echo "lines: $(wc -l < script.js)"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm init -y >/dev/null 2>&1
+          npm install playwright
+
+      - name: Install browser
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npx playwright install --with-deps chromium
+
+      - name: Syntax check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node --check script.js
+
+      - name: Run test
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+
+          mkdir -p artifacts
+
+          echo "=== start ===" \
+            | tee artifacts/run.log
+
+          node script.js 2>&1 \
+            | tee -a artifacts/run.log
+
+          rc=${PIPESTATUS[0]}
+
+          echo "$rc" > artifacts/exit_code.txt
+
+          echo "=== exit code: $rc ===" \
+            | tee -a artifacts/run.log
+
+          exit "$rc"
+
+      - name: Extract scan results
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+
+          {
+            echo "=== scan results ==="
+
+            grep -E \
+              "deck scan|deck:|init mission:|prepared|key_level|PREBUILT|PREFLIGHT|BOOT|front:|back:" \
+              artifacts/run.log || true
+
+          } | tee artifacts/scan_summary.txt
+
+      - name: Collect snapshots
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/snapshots
+
+          if [ -d war_html_snapshots ]; then
+            cp -a war_html_snapshots/. artifacts/snapshots/ || true
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-result-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Final status
+        if: always()
+        shell: bash
+        run: |
+          if [ -f artifacts/exit_code.txt ]; then
+            echo "exit code: $(cat artifacts/exit_code.txt)"
+          else
+            echo "exit code: unavailable"
+          fi
