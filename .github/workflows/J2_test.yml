@@ -1,4 +1,4 @@
-name: "Task A"
+name: "Task J2"
 
 on:
   workflow_dispatch:
@@ -17,22 +17,24 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install Playwright
+      - name: Install Playwright and Cheerio
         shell: bash
         run: |
           set -Eeuo pipefail
 
           npm init -y >/dev/null 2>&1
-          npm install --no-save playwright >/dev/null 2>&1
+          npm install --no-save playwright cheerio@1.0.0
           npx playwright install --with-deps chromium >/dev/null 2>&1
+
+          node -e "require('cheerio'); require('playwright'); console.log('[Check] Dependencies OK')"
 
       - name: Restore task state
         uses: actions/cache@v4
         with:
           path: .task-state
-          key: task-a-${{ github.ref_name }}
+          key: task-j2-${{ github.ref_name }}
           restore-keys: |
-            task-a-
+            task-j2-
 
       - name: Create script
         shell: bash
