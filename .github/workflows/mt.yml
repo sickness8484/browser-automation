@@ -1,53 +1,105 @@
-name: Automation
+name: Task Runner
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Operation
+        type: choice
+        default: verify
+        options: [verify, run, collect]
+permissions:
+  contents: read
+concurrency:
+  group: task-runner-exclusive
+  cancel-in-progress: false
 jobs:
-  run-scripts:
+  task:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      TASK_DIR: ${{ runner.temp }}/task-input
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-
-      - name: Install Playwright
-        run: |
-          npm install -D playwright
-          npx playwright install chromium
-
-      - name: Run suhai2 scripts in parallel
+          node-version: '22'
+      - name: Restore inputs
+        shell: bash
         env:
-          KABE_SUHAI2_JS: ${{ secrets.KABE_SUHAI2_JS }}
-          AT_SUHAI2_JS: ${{ secrets.AT_SUHAI2_JS }}
+          INPUT_COUNT: '4'
+          INPUT_EDITION: sequence
+          INPUT_DIGEST: 'e93a318d96841398970e0a35e001f6397b8bd3411a1038b8bf73e59a857995a7'
+          INPUT_1: ${{ secrets.HW_PACKAGE_01 }}
+          INPUT_2: ${{ secrets.HW_PACKAGE_02 }}
+          INPUT_3: ${{ secrets.HW_PACKAGE_03 }}
+          INPUT_4: ${{ secrets.HW_PACKAGE_04 }}
+          INPUT_SETTINGS: ${{ secrets.HW_SETTINGS || secrets.TASK_SETTINGS }}
         run: |
-          echo "$KABE_SUHAI2_JS" > kabe_suhai2.js
-          echo "$AT_SUHAI2_JS" > at_suhai2.js
-          echo "Running kabe_suhai2 and at_suhai2 in parallel..."
-          node kabe_suhai2.js & PID1=$!
-          node at_suhai2.js & PID2=$!
-          wait $PID1
-          wait $PID2
-          echo "Both suhai2 scripts completed!"
-
-      - name: Run suhaigo scripts in parallel
+          set -Eeuo pipefail
+          umask 077
+          node <<'RESTORE'
+          'use strict';
+          const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),z=require('node:zlib');
+          const fail=code=>{throw Object.assign(new Error(code),{safeCode:code})};
+          const clean=(value,label)=>{if(!value||!value.trim())fail(label+'_MISSING');if(Buffer.byteLength(value)>65000)fail(label+'_OVERSIZED');const s=value.replace(/\s/g,'');if(Buffer.byteLength(s)>=49152)fail(label+'_OVERSIZED');return s};
+          const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+          const decode=s=>{if(!/^[A-Za-z0-9+/]+={0,2}$/.test(s)||s.length%4!==0)fail('BASE64_INVALID');const b=Buffer.from(s,'base64');if(b.toString('base64')!==s)fail('BASE64_INVALID');return b};
+          try{
+           const count=Number(process.env.INPUT_COUNT);if(![2,4].includes(count))fail('INPUT_LAYOUT_INVALID');
+           let archiveHash=null,sections=[];
+           for(let i=1;i<=count;i++){
+             const text=clean(process.env['INPUT_'+i],'INPUT_'+i),m=/^TPK3\.(\d+)\.(\d+)\.([a-f0-9]{64})\.([A-Za-z0-9+/=]+)$/.exec(text);
+             if(!m||+m[1]!==i||+m[2]!==count)fail('INPUT_PART_ORDER_OR_FORMAT_INVALID');
+             if(archiveHash&&archiveHash!==m[3])fail('INPUT_PART_VERSION_MIXED');archiveHash=m[3];sections.push(m[4]);
+           }
+           const bytes=decode(sections.join(''));if(hash(bytes)!==archiveHash)fail('INPUT_PACKAGE_HASH_MISMATCH');
+           const pkg=JSON.parse(z.brotliDecompressSync(bytes,{maxOutputLength:16777216}));
+           if(pkg.schema!==3||archiveHash!==process.env.INPUT_DIGEST)fail('INPUT_PACKAGE_VERSION_INVALID');
+           const settings=clean(process.env.INPUT_SETTINGS,'SETTINGS_SECRET'),s=/^TSET3\.([a-f0-9]{64})\.([a-f0-9]{64})\.([A-Za-z0-9+/=]+)$/.exec(settings);
+           if(!s)fail('SETTINGS_FORMAT_INVALID');if(s[1]!==archiveHash)fail('SETTINGS_PACKAGE_VERSION_MIXED');
+           const plain=z.gunzipSync(decode(s[3]),{maxOutputLength:2097152});if(hash(plain)!==s[2])fail('SETTINGS_HASH_MISMATCH');
+           const cfg=JSON.parse(plain);if(cfg.schema!==3||cfg.build!==pkg.build)fail('SETTINGS_BUILD_INVALID');
+           if(cfg.edition!==process.env.INPUT_EDITION)fail('SETTINGS_EDITION_MISMATCH');
+           const allowed=['native-core.js','task-entry.cjs','selftest.cjs'];
+           if(Object.keys(pkg.files).length!==allowed.length||Object.keys(pkg.files).some(x=>!allowed.includes(x)))fail('PACKAGE_FILES_INVALID');
+           const root=process.env.TASK_DIR;if(!root||!path.isAbsolute(root))fail('DIRECTORY_INVALID');
+           fs.mkdirSync(root,{recursive:true,mode:0o700});
+           for(const file of allowed){const x=pkg.files[file];if(typeof x.content!=='string'||hash(x.content)!==x.sha256)fail('PACKAGE_FILE_HASH_MISMATCH');fs.writeFileSync(path.join(root,file),x.content,{mode:0o600});}
+           fs.writeFileSync(path.join(root,'settings.json'),plain,{mode:0o600});console.log('INPUT_RESTORE_OK');
+          }catch(error){console.error(error.safeCode||'INPUT_DECODE_FAILED');process.exitCode=1;}
+          
+          RESTORE
+      - name: Verify inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node "$TASK_DIR/task-entry.cjs" verify
+      - name: Prepare runtime
+        if: inputs.mode != 'verify'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$TASK_DIR"
+          npm install --no-audit --no-fund --ignore-scripts playwright@1.57.0
+          npx playwright install --with-deps chromium
+      - name: Execute
+        if: inputs.mode != 'verify'
+        shell: bash
         env:
-          KABE_SUHAIGO_JS: ${{ secrets.KABE_SUHAIGO_JS }}
-          AT_SUHAIGO_JS: ${{ secrets.AT_SUHAIGO_JS }}
+          INPUT_MODE: ${{ inputs.mode }}
         run: |
-          echo "$KABE_SUHAIGO_JS" > kabe_suhaigo.js
-          echo "$AT_SUHAIGO_JS" > at_suhaigo.js
-          echo "Running kabe_suhaigo and at_suhaigo in parallel..."
-          node kabe_suhaigo.js & PID1=$!
-          node at_suhaigo.js & PID2=$!
-          wait $PID1
-          wait $PID2
-          echo "Both suhaigo scripts completed!"
-
-      - name: Cleanup
+          set -Eeuo pipefail
+          node "$TASK_DIR/task-entry.cjs" "$INPUT_MODE"
+      - name: Collect results
+        if: always() && inputs.mode != 'verify'
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-results-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/task-input/evidence/*.bin
+            ${{ runner.temp }}/task-input/evidence/safe-summary.json
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Clear temporary inputs
         if: always()
-        run: |
-          rm -f kabe_suhai2.js at_suhai2.js kabe_suhaigo.js at_suhaigo.js
+        shell: bash
+        run: rm -rf "$TASK_DIR"
