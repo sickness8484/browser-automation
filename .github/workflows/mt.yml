@@ -27,7 +27,7 @@ jobs:
         env:
           INPUT_COUNT: '4'
           INPUT_EDITION: sequence
-          INPUT_DIGEST: '46ce8319858e31714de45c4669205da6300f3124970df0c633ca2f92d6f41dba'
+          INPUT_DIGEST: '49b2915dd97192ece150f944031b389daaa149a6b9204be2b2a54f894906487c'
           INPUT_1: ${{ secrets.HW_PACKAGE_01 }}
           INPUT_2: ${{ secrets.HW_PACKAGE_02 }}
           INPUT_3: ${{ secrets.HW_PACKAGE_03 }}
