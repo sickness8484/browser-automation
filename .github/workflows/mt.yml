@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      TASK_DIR: ${{ runner.temp }}/task-input
+      TASK_DIR: ${{ github.workspace }}/task-input
     steps:
       - uses: actions/setup-node@v4
         with:
@@ -95,8 +95,8 @@ jobs:
         with:
           name: task-results-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/task-input/evidence/*.bin
-            ${{ runner.temp }}/task-input/evidence/safe-summary.json
+            ${{ github.workspace }}/task-input/evidence/*.bin
+            ${{ github.workspace }}/task-input/evidence/safe-summary.json
           if-no-files-found: ignore
           retention-days: 3
       - name: Clear temporary inputs
