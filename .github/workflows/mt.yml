@@ -27,7 +27,7 @@ jobs:
         env:
           INPUT_COUNT: '4'
           INPUT_EDITION: sequence
-          INPUT_DIGEST: '49b2915dd97192ece150f944031b389daaa149a6b9204be2b2a54f894906487c'
+          INPUT_DIGEST: 'c3a4a3a0ee104e8e31d755a353b3f9d007048d41b75959975c10ea51d67e8b83'
           INPUT_1: ${{ secrets.HW_PACKAGE_01 }}
           INPUT_2: ${{ secrets.HW_PACKAGE_02 }}
           INPUT_3: ${{ secrets.HW_PACKAGE_03 }}
@@ -59,12 +59,13 @@ jobs:
            const plain=z.gunzipSync(decode(s[3]),{maxOutputLength:2097152});if(hash(plain)!==s[2])fail('SETTINGS_HASH_MISMATCH');
            const cfg=JSON.parse(plain);if(cfg.schema!==3||cfg.build!==pkg.build)fail('SETTINGS_BUILD_INVALID');
            if(cfg.edition!==process.env.INPUT_EDITION)fail('SETTINGS_EDITION_MISMATCH');
-           const allowed=['native-core.js','task-entry.cjs','selftest.cjs'];
+           const allowed=["native-core.js","task-entry.cjs","selftest.cjs","recovery-regression.cjs","dispatch-regression.cjs","phases-regression.cjs","entry-regression.cjs"];
            if(Object.keys(pkg.files).length!==allowed.length||Object.keys(pkg.files).some(x=>!allowed.includes(x)))fail('PACKAGE_FILES_INVALID');
            const root=process.env.TASK_DIR;if(!root||!path.isAbsolute(root))fail('DIRECTORY_INVALID');
            fs.mkdirSync(root,{recursive:true,mode:0o700});
            for(const file of allowed){const x=pkg.files[file];if(typeof x.content!=='string'||hash(x.content)!==x.sha256)fail('PACKAGE_FILE_HASH_MISMATCH');fs.writeFileSync(path.join(root,file),x.content,{mode:0o600});}
-           fs.writeFileSync(path.join(root,'settings.json'),plain,{mode:0o600});console.log('INPUT_RESTORE_OK');
+           fs.writeFileSync(path.join(root,'settings.json'),plain,{mode:0o600});
+           fs.writeFileSync(path.join(root,'build-manifest.json'),JSON.stringify({packageHash:archiveHash,build:pkg.build,settingsHash:s[2],files:Object.fromEntries(allowed.map(name=>[name,pkg.files[name].sha256]))}),{mode:0o600});console.log('INPUT_RESTORE_OK');
           }catch(error){console.error(error.safeCode||'INPUT_DECODE_FAILED');process.exitCode=1;}
           
           RESTORE
