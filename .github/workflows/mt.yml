@@ -27,7 +27,7 @@ jobs:
         env:
           INPUT_COUNT: '4'
           INPUT_EDITION: sequence
-          INPUT_DIGEST: 'c3a4a3a0ee104e8e31d755a353b3f9d007048d41b75959975c10ea51d67e8b83'
+          INPUT_DIGEST: '1151e26cc2e027356e728fa2adcb1b3e1db813a778c11a9593c26405adc6d88c'
           INPUT_1: ${{ secrets.HW_PACKAGE_01 }}
           INPUT_2: ${{ secrets.HW_PACKAGE_02 }}
           INPUT_3: ${{ secrets.HW_PACKAGE_03 }}
@@ -59,7 +59,7 @@ jobs:
            const plain=z.gunzipSync(decode(s[3]),{maxOutputLength:2097152});if(hash(plain)!==s[2])fail('SETTINGS_HASH_MISMATCH');
            const cfg=JSON.parse(plain);if(cfg.schema!==3||cfg.build!==pkg.build)fail('SETTINGS_BUILD_INVALID');
            if(cfg.edition!==process.env.INPUT_EDITION)fail('SETTINGS_EDITION_MISMATCH');
-           const allowed=["native-core.js","task-entry.cjs","selftest.cjs","recovery-regression.cjs","dispatch-regression.cjs","phases-regression.cjs","entry-regression.cjs"];
+           const allowed=["native-core.js","task-entry.cjs","selftest.cjs","recovery-regression.cjs","dispatch-regression.cjs","phases-regression.cjs","entry-regression.cjs","livefix-regression.cjs","worship-heal-regression.cjs"];
            if(Object.keys(pkg.files).length!==allowed.length||Object.keys(pkg.files).some(x=>!allowed.includes(x)))fail('PACKAGE_FILES_INVALID');
            const root=process.env.TASK_DIR;if(!root||!path.isAbsolute(root))fail('DIRECTORY_INVALID');
            fs.mkdirSync(root,{recursive:true,mode:0o700});
