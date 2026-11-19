@@ -19,7 +19,7 @@ jobs:
     env:
       TASK_DIR: ${{ github.workspace }}/task-input
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
       - name: Restore inputs
@@ -27,7 +27,7 @@ jobs:
         env:
           INPUT_COUNT: '4'
           INPUT_EDITION: sequence
-          INPUT_DIGEST: '1151e26cc2e027356e728fa2adcb1b3e1db813a778c11a9593c26405adc6d88c'
+          INPUT_DIGEST: '533ecc4588c02c1d09b958adcdb5ca8a90a12a86ba2c6b7af2c2c2eb470e10d5'
           INPUT_1: ${{ secrets.HW_PACKAGE_01 }}
           INPUT_2: ${{ secrets.HW_PACKAGE_02 }}
           INPUT_3: ${{ secrets.HW_PACKAGE_03 }}
@@ -59,7 +59,7 @@ jobs:
            const plain=z.gunzipSync(decode(s[3]),{maxOutputLength:2097152});if(hash(plain)!==s[2])fail('SETTINGS_HASH_MISMATCH');
            const cfg=JSON.parse(plain);if(cfg.schema!==3||cfg.build!==pkg.build)fail('SETTINGS_BUILD_INVALID');
            if(cfg.edition!==process.env.INPUT_EDITION)fail('SETTINGS_EDITION_MISMATCH');
-           const allowed=["native-core.js","task-entry.cjs","selftest.cjs","recovery-regression.cjs","dispatch-regression.cjs","phases-regression.cjs","entry-regression.cjs","livefix-regression.cjs","worship-heal-regression.cjs"];
+           const allowed=["native-core.js","task-entry.cjs","diagnostics.cjs","check-01.cjs","check-02.cjs","check-03.cjs","check-04.cjs","check-05.cjs","check-06.cjs","check-07.cjs","check-08.cjs","check-09.cjs","check-10.cjs","check-11.cjs"];
            if(Object.keys(pkg.files).length!==allowed.length||Object.keys(pkg.files).some(x=>!allowed.includes(x)))fail('PACKAGE_FILES_INVALID');
            const root=process.env.TASK_DIR;if(!root||!path.isAbsolute(root))fail('DIRECTORY_INVALID');
            fs.mkdirSync(root,{recursive:true,mode:0o700});
@@ -89,17 +89,28 @@ jobs:
           INPUT_MODE: ${{ inputs.mode }}
         run: |
           set -Eeuo pipefail
+          umask 077
+          ulimit -c 0
           node "$TASK_DIR/task-entry.cjs" "$INPUT_MODE"
-      - name: Collect results
+      - name: Validate export
+        id: exportcheck
         if: always() && inputs.mode != 'verify'
-        uses: actions/upload-artifact@v4
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          node "$TASK_DIR/task-entry.cjs" check-export
+      - name: Collect results
+        if: always() && inputs.mode != 'verify' && steps.exportcheck.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: task-results-${{ github.run_id }}
           path: |
-            ${{ github.workspace }}/task-input/evidence/*.bin
+            ${{ github.workspace }}/task-input/evidence/result.bin
             ${{ github.workspace }}/task-input/evidence/safe-summary.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 3
+          compression-level: 0
       - name: Clear temporary inputs
         if: always()
         shell: bash
